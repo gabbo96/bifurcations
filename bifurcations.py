@@ -9,9 +9,8 @@ from functions import *
 # -------------------------
 
 # I/O settings
-numMaxPlots = 75  # maximum number of branches' bed evolution plots during time evolution
+numMaxPlots = 10000  # maximum number of branches' bed evolution plots during time evolution
 iterationPlotStep = 2500
-test = 140  # test line for github
 
 # Model settings
 dsBC = 0
