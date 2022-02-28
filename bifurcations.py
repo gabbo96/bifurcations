@@ -1,3 +1,5 @@
+# %%
+
 import time
 
 import numpy as np
@@ -16,23 +18,23 @@ iterationPlotStep = 2500
 dsBC = 0
 tend = 1500
 eq_it_max = int(1e4)
-
+# %%
 # Hydraulic parameters
-RF = 'ks'  # flow resistance formula. Available options: 'ks' (Gauckler&Strickler), 'C' (Chézy)
-ks0 = 0  # if =0, it is computed using Gauckler&Strickler formula; otherwise it's considered a constant
-C0 = 0  # if =0, it is computed using a logarithmic formula; otherwise it's considered a constant
-eps_c = 2.5  # Chézy logarithmic formula coefficient
-TF = 'P90'  # sediment transport formula. Available options: 'P78' (Parker, 1978), 'MPM' (Meyer-Peter&Mueller, 1948),
+         RF     = 'ks' # flow resistance formula. Available options: 'ks' (Gauckler&Strickler), 'C' (Chézy)
+         ks0    = 0 # if =0, it is computed using Gauckler&Strickler formula; otherwise it's considered a constant
+         C0     = 0 # if =0, it is computed using a logarithmic formula; otherwise it's considered a constant
+         eps_c  = 2.5 # Chézy logarithmic formula coefficient
+         TF     = 'P90' # sediment transport formula. Available options: 'P78' (Parker, 1978), 'MPM' (Meyer-Peter&Mueller, 1948),
 # 'P90' (Parker, 1990), 'EH' (Engelund&Hansen)
-Ls = 3000  # =L/D0, L=branches' dimensional length
-beta0 = 25
-theta0 = 0.1
-ds0 = 0.01  # =d50/D0
-rW = 0.5  # =Wb/W_a, where Wb=Wc and W_a=upstream channel width
-d50 = 0.01  # median sediment diameter [m]
-p = 0.6  # bed porosity
-r = 0.5  # Ikeda parameter
-inStep = -5e-4  # imposed initial inlet step = (eta_bn - eta_cn) / D0
+         Ls     = 3000 # =L/D0, L=branches' dimensional length
+         beta0  = 25
+         theta0 = 0.1
+         ds0    = 0.01 # =d50/D0
+         rW     = 0.5 # =Wb/W_a, where Wb=Wc and W_a=upstream channel width
+         d50    = 0.01 # median sediment diameter [m]
+         p      = 0.6 # bed porosity
+         r      = 0.5 # Ikeda parameter
+         inStep = -5e-4 # imposed initial inlet step = (eta_bn - eta_cn) / D0
 
 # Numerical parameters
 dt = 100  # timestep [s] (complete model only)
@@ -49,13 +51,13 @@ g = 9.81
 # ----------------------------------
 
 # Main channel IC
-S0 = theta0 * delta * ds0
-D0 = d50 / ds0
-W_a = beta0 * 2 * D0
+S0    = theta0 * delta * ds0
+D0    = d50 / ds0
+W_a   = beta0 * 2 * D0
 phi00, phiD0, phiT0 = phis_scalar(theta0, TF, D0, d50)
-Q0 = uniFlowQ(RF, W_a, S0, D0, d50, g, ks0, C0, eps_c)
-Qs0 = W_a * np.sqrt(g * delta * d50 ** 3) * phi00
-Fr0 = Q0 / (W_a * D0 * np.sqrt(g * D0))
+Q0    = uniFlowQ(RF, W_a, S0, D0, d50, g, ks0, C0, eps_c)
+Qs0   = W_a * np.sqrt(g * delta * d50 ** 3) * phi00
+Fr0   = Q0 / (W_a * D0 * np.sqrt(g * D0))
 
 # βR and alpha computation
 betaR = betaR_MR(RF, theta0, ds0, r, phiD0, phiT0, eps_c)
@@ -66,32 +68,32 @@ alpha_MR = betaR / betaC
 Tf = (1 - p) * W_a * D0 / (Qs0 / W_a)
 
 # Arrays initialization
-eta_ab = np.zeros(nc)
-eta_ac = np.zeros(nc)
-eta_b = np.zeros(nc)
-eta_c = np.zeros(nc)
-D_ab = np.zeros(nc)
-D_ac = np.zeros(nc)
-Q_ab = np.zeros(nc)
-Q_ac = np.zeros(nc)
-D_b = np.zeros(nc + 1)
-D_c = np.zeros(nc + 1)
-S_a = np.zeros(nc + 1)
-S_b = np.zeros(nc + 1)
-S_c = np.zeros(nc + 1)
+eta_ab   = np.zeros(nc)
+eta_ac   = np.zeros(nc)
+eta_b    = np.zeros(nc)
+eta_c    = np.zeros(nc)
+D_ab     = np.zeros(nc)
+D_ac     = np.zeros(nc)
+Q_ab     = np.zeros(nc)
+Q_ac     = np.zeros(nc)
+D_b      = np.zeros(nc + 1)
+D_c      = np.zeros(nc + 1)
+S_a      = np.zeros(nc + 1)
+S_b      = np.zeros(nc + 1)
+S_c      = np.zeros(nc + 1)
 Theta_ab = np.zeros(nc)
 Theta_ac = np.zeros(nc)
-Theta_b = np.zeros(nc + 1)
-Theta_c = np.zeros(nc + 1)
-Phi_ab = np.zeros(nc)
-Phi_ac = np.zeros(nc)
-Phi_b = np.zeros(nc + 1)
-Phi_c = np.zeros(nc + 1)
-Qs_ab = np.zeros(nc)
-Qs_ac = np.zeros(nc)
-Qs_y = np.zeros(nc)
-Qs_b = np.zeros(nc + 1)
-Qs_c = np.zeros(nc + 1)
+Theta_b  = np.zeros(nc + 1)
+Theta_c  = np.zeros(nc + 1)
+Phi_ab   = np.zeros(nc)
+Phi_ac   = np.zeros(nc)
+Phi_b    = np.zeros(nc + 1)
+Phi_c    = np.zeros(nc + 1)
+Qs_ab    = np.zeros(nc)
+Qs_ac    = np.zeros(nc)
+Qs_y     = np.zeros(nc)
+Qs_b     = np.zeros(nc + 1)
+Qs_c     = np.zeros(nc + 1)
 
 # Branches' IC
 dx = Ls * D0 / nc
@@ -138,7 +140,7 @@ print('INPUT PARAMETERS:\nFlow resistance formula = %s\nSolid transport formula 
       '\nMAIN CHANNEL IC:\nW_a = %4.2f m\nS0 = %3.2e\nD0 = %3.2f m\nH0 = %2.1f m\nFr0 = %2.1f\nL = %4.1f m\n'
       'Q0 = %3.2e m^3 s^-1\nQs0 = %3.2e m^3 s^-1\n\nExner time: Tf = %3.2f h\n'
       % (RF, TF, nc, dx, dt, tend, Ls, beta0, theta0, ds0, r, d50, betaR, (beta0-betaR) / betaR,
-         alpha_MR, W_a, S0, D0, H0, Fr0, Ls * D0, Q0, Qs0, Tf / 3600))
+      alpha_MR, W_a, S0, D0, H0, Fr0, Ls * D0, Q0, Qs0, Tf / 3600))
 print("BRT equilibrium solution:\ndeltaQ = %5.4f\nθ_b = %4.3f, θ_c ="
       " %4.3f\nFr_b = %3.2f, Fr_c = %3.2f\nS = %2.1e\n"
       % (BRT_out[:6]))
