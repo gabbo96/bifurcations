@@ -20,21 +20,21 @@ tend = 1500
 eq_it_max = int(1e4)
 # %%
 # Hydraulic parameters
-         RF     = 'ks' # flow resistance formula. Available options: 'ks' (Gauckler&Strickler), 'C' (Chézy)
-         ks0    = 0 # if =0, it is computed using Gauckler&Strickler formula; otherwise it's considered a constant
-         C0     = 0 # if =0, it is computed using a logarithmic formula; otherwise it's considered a constant
-         eps_c  = 2.5 # Chézy logarithmic formula coefficient
-         TF     = 'P90' # sediment transport formula. Available options: 'P78' (Parker, 1978), 'MPM' (Meyer-Peter&Mueller, 1948),
+RF     = 'ks' # flow resistance formula. Available options: 'ks' (Gauckler&Strickler), 'C' (Chézy)
+ks0    = 0 # if =0, it is computed using Gauckler&Strickler formula; otherwise it's considered a constant
+C0     = 0 # if =0, it is computed using a logarithmic formula; otherwise it's considered a constant
+eps_c  = 2.5 # Chézy logarithmic formula coefficient
+TF     = 'P90' # sediment transport formula. Available options: 'P78' (Parker, 1978), 'MPM' (Meyer-Peter&Mueller, 1948),
 # 'P90' (Parker, 1990), 'EH' (Engelund&Hansen)
-         Ls     = 3000 # =L/D0, L=branches' dimensional length
-         beta0  = 25
-         theta0 = 0.1
-         ds0    = 0.01 # =d50/D0
-         rW     = 0.5 # =Wb/W_a, where Wb=Wc and W_a=upstream channel width
-         d50    = 0.01 # median sediment diameter [m]
-         p      = 0.6 # bed porosity
-         r      = 0.5 # Ikeda parameter
-         inStep = -5e-4 # imposed initial inlet step = (eta_bn - eta_cn) / D0
+Ls     = 3000 # =L/D0, L=branches' dimensional length
+beta0  = 25
+theta0 = 0.1
+ds0    = 0.01 # =d50/D0
+rW     = 0.5 # =Wb/W_a, where Wb=Wc and W_a=upstream channel width
+d50    = 0.01 # median sediment diameter [m]
+p      = 0.6 # bed porosity
+r      = 0.5 # Ikeda parameter
+inStep = -5e-4 # imposed initial inlet step = (eta_bn - eta_cn) / D0
 
 # Numerical parameters
 dt = 100  # timestep [s] (complete model only)
