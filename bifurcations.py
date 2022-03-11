@@ -1,9 +1,6 @@
 # %%
-
 import time
-
 import numpy as np
-
 from functions import *
 
 # -------------------------
@@ -18,7 +15,7 @@ iterationPlotStep = 2500
 dsBC = 0
 tend = 1500
 eq_it_max = int(1e4)
-# %%
+
 # Hydraulic parameters
 RF     = 'ks' # flow resistance formula. Available options: 'ks' (Gauckler&Strickler), 'C' (Chézy)
 ks0    = 0 # if =0, it is computed using Gauckler&Strickler formula; otherwise it's considered a constant
@@ -97,26 +94,20 @@ Qs_c     = np.zeros(nc + 1)
 
 # Branches' IC
 dx = Ls * D0 / nc
-eta_ab[0] = 10000
-for i in range(1, nc):
-    eta_ab[i] = eta_ab[i - 1] - S0 * dx
-eta_ac = eta_ab
-
-eta_b[0] = eta_ab[-1] - S0 * dx
-for i in range(1, nc):
-    eta_b[i] = eta_b[i - 1] - S0 * dx
-eta_c = eta_b
-
+eta_ab = np.linspace(0, -S0*dx*nc, num=len(eta_ab))
+eta_ac[:] = eta_ab[:]
+eta_b = np.linspace(eta_ab[-1]-S0*dx, eta_ab[-1]-S0*dx-S0*dx*nc, num=len(eta_b))
+eta_c[:] = eta_b[:]
 eta_ab_ic = eta_ab[:]
 eta_ac_ic = eta_ac[:]
-eta_b_ic = eta_b[:]
-eta_c_ic = eta_c[:]
-W_b = rW * W_a
-W_c = W_b
-Q_b = Q0 / 2
-Q_c = Q0 / 2
-Q_ab += Q0 / 2
-Q_ac += Q0 / 2
+eta_b_ic  = eta_b[:]
+eta_c_ic  = eta_c[:]
+W_b       = rW * W_a
+W_c       = W_b
+Q_b       = Q0 / 2
+Q_c       = Q0 / 2
+Q_ab      += Q0 / 2
+Q_ac      += Q0 / 2
 
 # Time-tracking lists definition
 deltaQ: list = [0]
@@ -150,16 +141,16 @@ print("BRT equilibrium solution:\ndeltaQ = %5.4f\nθ_b = %4.3f, θ_c ="
 # --------------
 
 # Bed elevation profiles' plotting setup
-x_plot = np.linspace(-dx / 2, Ls * D0 - dx / 2, num=nc + 1)
-crange = np.linspace(0, 1, numMaxPlots)
+x_plot     = np.linspace(-dx / 2, Ls * D0 - dx / 2, num=nc + 1)
+crange     = np.linspace(0, 1, numMaxPlots)
 bed_colors = plt.cm.viridis(crange)
-cindex = 0
+cindex     = 0
 
 # Time-control variables definition
-t: list = [0]  # time array
-total_time = time.time()  # total simulation time
-eq_it = 0  # progressive number of iterations in which deltaQ is constant. When eq_it=eq_it_max, iterations stop
-eqIndex = 0
+t         : list = [0] # time array
+total_time = time.time() # total simulation time
+eq_it      = 0 # progressive number of iterations in which deltaQ is constant. When eq_it=eq_it_max, iterations stop
+eqIndex    = 0
 
 # Node perturbation
 eta_ab[-1] += inStep * D0 / 2
@@ -170,8 +161,6 @@ for n in range(0, maxIter):
     barIndex = np.where(eta_ab != eta_ac)[0][0]
 
     # Channel cells slope update
-    eta_a_mean = (eta_ab + eta_ac) / 2
-    S_a[1:] = (eta_a_mean[:-1] - eta_a_mean[1:]) / dx
     S_b[0] = (eta_ab[-1] - eta_b[0]) / dx
     S_c[0] = (eta_ac[-1] - eta_c[0]) / dx
     S_b[1:-1] = (eta_b[:-1] - eta_b[1:]) / dx
@@ -197,17 +186,11 @@ for n in range(0, maxIter):
         D_b = buildProfile(RF, D_b[-1], Q_b, W_b, S_b, d50, dx, g, ks0, C0, eps_c)
         D_c = buildProfile(RF, D_c[-1], Q_c, W_c, S_c, d50, dx, g, ks0, C0, eps_c)
 
-    # Compute discharge at each bar cell: each half channel varies its discharge linearly from Q0/2 to the corresponding
-    # branch discharge linearly in space along the bar
-    Q_ab[barIndex:] = np.linspace(Q0 / 2, Q_b, num=(nc - barIndex + 1))[:-1]
-    Q_ac[barIndex:] = np.linspace(Q0 / 2, Q_c, num=(nc - barIndex + 1))[:-1]
+    # Solve the governing system to compute the unknowns D_ab[i], D_ac[i], Q_ab[i], Q_ac[i] and Qy[i]
+    # along the portion of semichannels ab and ac influenced by the bar
+    ...
 
-    # Water depth update in channel a
-    D_ab[-1] = D_b[0] + (eta_b[0] - eta_ab[-2]) / 2
-    D_ac[-1] = D_c[0] + (eta_c[0] - eta_ac[-2]) / 2
-    for i in range(nc - 1, barIndex - 1, -1):
-        D_ab[i - 1] = D_ab[i] + (eta_ab[i] - eta_ab[i - 2]) / 2
-        D_ac[i - 1] = D_ac[i] + (eta_ac[i] - eta_ac[i - 2]) / 2
+    # Water depth update in channel a, upstream the bar
     D_ab[:barIndex - 1] = buildProfile(RF, (D_ab[barIndex - 1] + D_ac[barIndex - 1]) / 2, Q0, W_a, S_a, d50, dx, g, ks0,
                                        C0, eps_c)
     D_ac[:barIndex - 1] = D_ab[:barIndex - 1]
@@ -215,14 +198,14 @@ for n in range(0, maxIter):
     # Shields parameter update
     Theta_ab = shieldsUpdate(RF, Q_ab, W_a / 2, D_ab, d50, g, delta, ks0, C0, eps_c)
     Theta_ac = shieldsUpdate(RF, Q_ac, W_a / 2, D_ac, d50, g, delta, ks0, C0, eps_c)
-    Theta_b = shieldsUpdate(RF, Q_b, W_b, D_b, d50, g, delta, ks0, C0, eps_c)
-    Theta_c = shieldsUpdate(RF, Q_c, W_c, D_c, d50, g, delta, ks0, C0, eps_c)
+    Theta_b  = shieldsUpdate(RF, Q_b, W_b, D_b, d50, g, delta, ks0, C0, eps_c)
+    Theta_c  = shieldsUpdate(RF, Q_c, W_c, D_c, d50, g, delta, ks0, C0, eps_c)
 
     # Solid discharge computation
     Qs_ab = W_a / 2 * np.sqrt(g * delta * d50 ** 3) * phis(Theta_ab, TF, D0, d50)[0]
     Qs_ac = W_a / 2 * np.sqrt(g * delta * d50 ** 3) * phis(Theta_ac, TF, D0, d50)[0]
-    Qs_b = W_b * np.sqrt(g * delta * d50 ** 3) * phis(Theta_b, TF, D0, d50)[0]
-    Qs_c = W_c * np.sqrt(g * delta * d50 ** 3) * phis(Theta_c, TF, D0, d50)[0]
+    Qs_b  = W_b * np.sqrt(g * delta * d50 ** 3) * phis(Theta_b, TF, D0, d50)[0]
+    Qs_c  = W_c * np.sqrt(g * delta * d50 ** 3) * phis(Theta_c, TF, D0, d50)[0]
 
     # Apply the second upstream BC
     Qs_ab[0] = Qs0
@@ -248,3 +231,5 @@ for n in range(0, maxIter):
         myPlot(2, x_plot[1:], eta_b - eta_b_ic, None, color=bed_colors[cindex])
         myPlot(3, x_plot[1:], eta_c - eta_c_ic, None, color=bed_colors[cindex])
         cindex = cindex + 1
+
+# %%
