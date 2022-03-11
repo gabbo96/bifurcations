@@ -1,3 +1,4 @@
+from cmath import sqrt
 from matplotlib import pyplot as plt
 from scipy import optimize as opt
 import numpy as np
@@ -398,3 +399,20 @@ def mkdir_p(mypath):
             pass
         else:
             raise
+
+def fSysSC(x, D0, Q0, D_abV, D_acV, Q_abV, Q_acV, S_ab, S_ac, w_ab, w_ac, eta_ab, eta_ac, g, d50, dx, rf, ):
+    # Function to be used to iteratively solve the system governing water partitioning along the semichannels.
+    # The unknown array x is equal to x=[D_ab[i]/D0, D_ac[i]/D0, Q_ab[i]/Q0, Q_ac[i]/Q0, Qy[i]/Q0]
+    # Change in notation: i -> M, i+1 -> V
+    res=np.ones((5))
+    D_abM, D_acM, Q_abM, Q_acM, Q_y = (x[0]*D0, x[1]*D0, x[2]*Q0, x[3]*Q0, x[4]*Q0)
+    j_ab = uniFlowS(rf, Q_abV, w_ab, D_abV, d50, g, 0, 0, 2.5)
+    Fr_ab = Q_abV/(w_ab*D_abV)/sqrt(g*D_abV)
+    j_ac = uniFlowS(rf, Q_acV, w_ac, D_acV, d50, g, 0, 0, 2.5)
+    Fr_ac = Q_acV/(w_ac*D_acV)/sqrt(g*D_acV)
+    res[0] = ((D_abV-D_abM)/dx)/((S_ab-j_ab-Q_y/dx*Q_abV/(g*w_ab**2*D_abV**2))/(1-Fr_ab**2))-1
+    res[1] = ((D_acV-D_acM)/dx)/((S_ac-j_ac-Q_y/dx*Q_acV/(g*w_ac**2*D_acV**2))/(1-Fr_ac**2))-1
+    res[2] = (Q_abM+Q_y)/Q_abV-1
+    res[3] = (Q_acM-Q_y)/Q_acV-1
+    res[4] = (D_abM+eta_ab)/(D_acM+eta_ac)-1
+    return res
