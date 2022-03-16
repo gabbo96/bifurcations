@@ -12,7 +12,7 @@ iterationPlotStep = 10
 
 # Model settings
 dsBC = 0
-tend = 2
+tend = 0.5
 eq_it_max = int(1e4)
 
 # Hydraulic parameters
@@ -88,7 +88,7 @@ W_ac      = W_a/2
 Q_ab      += Q0/2
 Q_ac      += Q0/2
 x = np.array([1,1,0.5,0.5,0.001])  # initial guess for first iteration of the system to be solved for channel a
-eta_ab[-1] += 2*d50
+eta_ab[-1] += 0.001*d50
 
 # Downstream BC
 H0 = eta_ab[-1] + D0
@@ -117,11 +117,18 @@ for n in range(0, maxIter):
     # Solve the governing system to compute the unknowns D_ab[i], D_ac[i], Q_ab[i], Q_ac[i] and Qy[i]
     # along the portion of semichannels ab and ac influenced by the bar
     for i in range(nc, 1, -1):
+        """
         x = opt.fsolve(fSysSC, x, (D0, Q0, D_ab[i], D_ac[i], Q_ab[i], Q_ac[i], (S_ab[i]+S_ab[i-1])/2, 
             (S_ac[i]+S_ac[i-1])/2, W_ab, W_ac, (eta_ab[i-1]+eta_ab[i-2])/2, (eta_ac[i-1]+eta_ac[i-2])/2,
              g, d50, dx, ks0, C0, RF), xtol=tol)[:5]
         D_ab[i-1], D_ac[i-1], Q_ab[i-1], Q_ac[i-1], Q_y[i-1] = (x[0]*D0, x[1]*D0, x[2]*Q0, x[3]*Q0, x[4]*Q0)
-        if eta_ab[i-1] == eta_ac[i-1] and D_ab[i-1] == D_ac[i-1] and Q_ab[i-1] == Q_ac[i-1]:
+        """
+        A, B = coeffSysSC(D_ab[i], D_ac[i], Q_ab[i], Q_ac[i], (S_ab[i]+S_ab[i-1])/2, 
+            (S_ac[i]+S_ac[i-1])/2, W_ab, W_ac, (eta_ab[i-1]+eta_ab[i-2])/2, (eta_ac[i-1]+eta_ac[i-2])/2,
+             g, d50, dx, ks0, C0, RF)
+        x = np.linalg.solve(A, B)
+        Q_y[i-1], D_ab[i-1], D_ac[i-1], Q_ab[i-1], Q_ac[i-1] = x
+        if eta_ab[i-2] == eta_ac[i-2] and D_ab[i-1] == D_ac[i-1] and Q_ab[i-1] == Q_ac[i-1]:
             break 
     
     # Water depth update in channel a, upstream the bar    
