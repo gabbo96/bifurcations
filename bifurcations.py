@@ -9,7 +9,7 @@ from functions import *
 
 # I/O settings
 numMaxPlots = 10000  # maximum number of branches' bed evolution plots during time evolution
-iterationPlotStep = 2500
+iterationPlotStep = 10
 
 # Model settings
 dsBC = 0
@@ -25,7 +25,7 @@ TF     = 'P90' # sediment transport formula. Available options: 'P78' (Parker, 1
 # 'P90' (Parker, 1990), 'EH' (Engelund&Hansen)
 Ls     = 3000 # =L/D0, L=branches' dimensional length
 beta0  = 25
-theta0 = 0.1
+theta0 = 0.08
 ds0    = 0.01 # =d50/D0
 rW     = 0.5 # =Wb/W_a, where Wb=Wc and W_a=upstream channel width
 d50    = 0.01 # median sediment diameter [m]
@@ -34,14 +34,14 @@ r      = 0.5 # Ikeda parameter
 inStep = -5e-4 # imposed initial inlet step = (eta_bn - eta_cn) / D0
 
 # Numerical parameters
-dt = 100  # timestep [s] (complete model only)
-nc = 30  # branches' number of cells
-maxIter = int(1e8)  # max number of iterations during time evolution
-tol = 1e-6  # Newton method tolerance
+dt      = 100 # timestep [s] (complete model only)
+nc      = 30 # branches' number of cells
+maxIter = int(1e8) # max number of iterations during time evolution
+tol     = 1e-6 # Newton method tolerance
 
 # Physical constants
 delta = 1.65
-g = 9.81
+g     = 9.81
 
 # ----------------------------------
 # IC & BC DEFINITION AND MODEL SETUP
@@ -69,33 +69,29 @@ eta_ab   = np.zeros(nc)
 eta_ac   = np.zeros(nc)
 eta_b    = np.zeros(nc)
 eta_c    = np.zeros(nc)
-D_ab     = np.zeros(nc + 1)
-D_ac     = np.zeros(nc + 1)
-Q_ab     = np.zeros(nc + 1)
-Q_ac     = np.zeros(nc + 1)
+D_ab     = np.zeros(nc+1)
+D_ac     = np.zeros(nc+1)
+Q_ab     = np.zeros(nc+1)
+Q_ac     = np.zeros(nc+1)
 Q_y      = np.zeros(nc)
-D_b      = np.zeros(nc + 1)
-D_c      = np.zeros(nc + 1)
-S_ab     = np.zeros(nc + 1)
-S_ac     = np.zeros(nc + 1)
-S_b      = np.zeros(nc + 1)
-S_c      = np.zeros(nc + 1)
-Theta_ab = np.zeros(nc)
-Theta_ac = np.zeros(nc)
-Theta_b  = np.zeros(nc + 1)
-Theta_c  = np.zeros(nc + 1)
-Phi_ab   = np.zeros(nc)
-Phi_ac   = np.zeros(nc)
-Phi_b    = np.zeros(nc + 1)
-Phi_c    = np.zeros(nc + 1)
-Qs_ab    = np.zeros(nc)
-Qs_ac    = np.zeros(nc)
+D_b      = np.zeros(nc+1)
+D_c      = np.zeros(nc+1)
+S_ab     = np.zeros(nc+1)
+S_ac     = np.zeros(nc+1)
+S_b      = np.zeros(nc+1)
+S_c      = np.zeros(nc+1)
+Theta_ab = np.zeros(nc+1)
+Theta_ac = np.zeros(nc+1)
+Theta_b  = np.zeros(nc+1)
+Theta_c  = np.zeros(nc+1)
+Qs_ab    = np.zeros(nc+1)
+Qs_ac    = np.zeros(nc+1)
 Qs_y     = np.zeros(nc)
-Qs_b     = np.zeros(nc + 1)
-Qs_c     = np.zeros(nc + 1)
+Qs_b     = np.zeros(nc+1)
+Qs_c     = np.zeros(nc+1)
 
 # Branches' IC
-dx        = Ls * D0 / nc
+dx        = Ls*D0/nc
 eta_ab    = np.linspace(0, -S0*dx*nc, num=len(eta_ab))
 eta_ac[:] = eta_ab[:]
 eta_b     = np.linspace(eta_ab[-1]-S0*dx, eta_ab[-1]-S0*dx-S0*dx*nc, num=len(eta_b))
@@ -104,14 +100,14 @@ eta_ab_ic = eta_ab[:]
 eta_ac_ic = eta_ac[:]
 eta_b_ic  = eta_b[:]
 eta_c_ic  = eta_c[:]
-W_b       = rW * W_a
+W_b       = rW*W_a
 W_c       = W_b
-W_ab      = W_a / 2
-W_ac      = W_a / 2
-Q_b       = Q0 / 2
-Q_c       = Q0 / 2
-Q_ab      += Q0 / 2
-Q_ac      += Q0 / 2
+W_ab      = W_a/2
+W_ac      = W_a/2
+Q_b       = Q0/2
+Q_c       = Q0/2
+Q_ab      += Q0/2
+Q_ac      += Q0/2
 x = np.array([1,1,0.5,0.5,0.001])  # initial guess for first iteration of the system to be solved for channel a
 
 # Time-tracking lists definition
@@ -146,7 +142,7 @@ print("BRT equilibrium solution:\ndeltaQ = %5.4f\nθ_b = %4.3f, θ_c ="
 # --------------
 
 # Bed elevation profiles' plotting setup
-x_plot     = np.linspace(-dx / 2, Ls * D0 - dx / 2, num=nc + 1)
+x_plot     = np.linspace(-dx/2, Ls*D0-dx/2, num=nc+1)
 crange     = np.linspace(0, 1, numMaxPlots)
 bed_colors = plt.cm.viridis(crange)
 cindex     = 0
@@ -204,7 +200,7 @@ for n in range(0, maxIter):
             (S_ac[i]+S_ac[i-1])/2, W_ab, W_ac, (eta_ab[i-1]+eta_ab[i-2])/2, (eta_ac[i-1]+eta_ac[i-2])/2,
              g, d50, dx, ks0, C0, RF), xtol=tol)[:5]
         D_ab[i-1], D_ac[i-1], Q_ab[i-1], Q_ac[i-1], Q_y[i-1] = (x[0]*D0, x[1]*D0, x[2]*Q0, x[3]*Q0, x[4]*Q0)
-        if eta_ab[i-1] == eta_ac[i-1] and D_ab[i-1] == D_ac[i-1] and Q_ab[i-1] == Q_ac[-1]:
+        if eta_ab[i-1] == eta_ac[i-1] and D_ab[i-1] == D_ac[i-1] and Q_ab[i-1] == Q_ac[i-1]:
             break 
     
     # Water depth update in channel a, upstream the bar    
@@ -226,12 +222,12 @@ for n in range(0, maxIter):
     Qs_c  = W_c*np.sqrt(g*delta*d50**3)*phis(Theta_c, TF, D0, d50)[0]
 
     # Impose the second upstream BC
-    Qs_ab[0] = Qs0
-    Qs_ac[0] = Qs0
+    Qs_ab[0] = Qs0/2
+    Qs_ac[0] = Qs0/2
 
     # Compute transverse solid discharge along channel a
     Theta_a_avg = shieldsUpdate(RF, Q0, W_a, (D_ab+D_ac)/2, d50, g, delta, ks0, C0, eps_c)
-    Qs_y[:] = (Qs_ab[:-1]+Qs_ac[:-1])*(Q_y/Q0-2*r*dx/(W_a*sqrt(Theta_a_avg[:-1]))*(eta_ab-eta_ac)/W_a)
+    Qs_y[:] = (Qs_ab[:-1]+Qs_ac[:-1])*(Q_y/Q0-2*r*dx/(W_a*Theta_a_avg[:-1]**0.5)*(eta_ab-eta_ac)/W_a)
     
     # Apply Exner equation to update node cells elevation
     eta_ab += dt*(Qs_ab[:-1]-Qs_ab[1:]+Qs_y)/((1-p)*W_ab*dx)
@@ -239,8 +235,9 @@ for n in range(0, maxIter):
     eta_b  += dt*(Qs_b[:-1]-Qs_b[1:])/((1-p)*dx*W_b)
     eta_c  += dt*(Qs_c[:-1]-Qs_c[1:])/((1-p)*dx*W_c)
 
-    # End time condition for the simulation's end
-    if t[n] >= (tend * Tf):
+    # Time update + end-time condition for the simulation's end
+    t.append(t[-1]+dt)
+    if t[-1] >= (tend * Tf):
         print('\nEnd time reached\n')
         eqIndex = n
         break
@@ -257,4 +254,5 @@ for n in range(0, maxIter):
         myPlot(3, x_plot[1:], eta_c-eta_c_ic, None, color=bed_colors[cindex])
         cindex = cindex + 1
 
+plt.show()
 # %%

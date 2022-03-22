@@ -416,3 +416,19 @@ def fSysSC(x, D0, Q0, D_abV, D_acV, Q_abV, Q_acV, S_ab, S_ac, w_ab, w_ac, eta_ab
     res[3] = (Q_acM-Q_y)/Q_acV-1
     res[4] = (D_abM+eta_ab)/(D_acM+eta_ac)-1
     return res
+
+def coeffSysSC(D_abV, D_acV, Q_abV, Q_acV, S_ab, S_ac, w_ab, w_ac, eta_ab, eta_ac, g, d50, dx, ks0, c0, rf):
+    # Computes the coefficient matrix A and the array B for the semichannels system to compute
+    # the unknowns x=[D_ab[i]/D0, D_ac[i]/D0, Q_ab[i]/Q0, Q_ac[i]/Q0, Qy[i]/Q0], that is linear
+    # as long as the equations discretization is explicits
+    j_ab  = uniFlowS(rf, Q_abV, w_ab, D_abV, d50, g, ks0, c0, 2.5)
+    j_ac  = uniFlowS(rf, Q_acV, w_ac, D_acV, d50, g, ks0, c0, 2.5)
+    Fr_ab = Q_abV/(w_ab*D_abV)/sqrt(g*D_abV)    
+    Fr_ac = Q_acV/(w_ac*D_acV)/sqrt(g*D_acV)
+    A = np.array([[Q_abV/(dx*g*w_ab**2*D_abV**2*(1-Fr_ab**2)),-1/dx, 0, 0, 0],
+                  [-Q_acV/(dx*g*w_ac**2*D_acV**2*(1-Fr_ac**2)),0,-1/dx, 0, 0],
+                  [1,0,0,1,0],
+                  [-1,0,0,0,1],
+                  [0,1,-1,0,0]])
+    B = np.array([-D_abV/dx+(S_ab-j_ab)/(1-Fr_ab**2), -D_acV/dx+(S_ac-j_ac)/(1-Fr_ac**2), Q_abV, Q_acV, -eta_ab+eta_ac])
+    return A, B
