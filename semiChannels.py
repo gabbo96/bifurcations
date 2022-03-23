@@ -11,7 +11,7 @@ numMaxPlots = 10000  # maximum number of branches' bed evolution plots during ti
 iterationPlotStep = 10
 
 # Model settings
-dsBC = 0
+Qasymm = 1.01  # downstream BC: Q_ab[-1]=Q0/2*Qasymm
 tend = 0.5
 eq_it_max = int(1e4)
 
@@ -24,7 +24,7 @@ TF     = 'P90' # sediment transport formula. Available options: 'P78' (Parker, 1
 # 'P90' (Parker, 1990), 'EH' (Engelund&Hansen)
 Ls     = 3000 # =L/D0, L=branches' dimensional length
 beta0  = 25
-theta0 = 0.08
+theta0 = 0.1
 ds0    = 0.01 # =d50/D0
 rW     = 0.5 # =Wb/W_a, where Wb=Wc and W_a=upstream channel width
 d50    = 0.01 # median sediment diameter [m]
@@ -63,6 +63,8 @@ eta_ab    = np.zeros(nc)
 eta_ac    = np.zeros(nc)
 eta_ab_ic = np.zeros(nc)
 eta_ac_ic = np.zeros(nc)
+deltaEta  = np.zeros(nc+1)
+D_a       = np.zeros(nc+1)
 D_ab      = np.zeros(nc+1)
 D_ac      = np.zeros(nc+1)
 Q_ab      = np.zeros(nc+1)
@@ -85,57 +87,43 @@ eta_ab_ic[:] = eta_ab[:]
 eta_ac_ic[:] = eta_ac[:]
 W_ab      = W_a/2
 W_ac      = W_a/2
-Q_ab      += Q0/2
-Q_ac      += Q0/2
-x = np.array([1,1,0.5,0.5,0.001])  # initial guess for first iteration of the system to be solved for channel a
-eta_ab[-1] += 0.001*d50
+Q_ab[-1] = Q0/2*Qasymm
+Q_ac[-1] = Q0-Q_ab[-1]
 
 # Downstream BC
-H0 = eta_ab[-1] + D0
-Hd_ab: list = [H0]
-Hd_ac: list = [H0]
+H0 = eta_ab[-1]-S0*dx+D0
 
 # Plot semichannels bed elevation values
 eta_a = np.vstack([eta_ac-eta_ac_ic, eta_ab-eta_ab_ic])
 plt.imshow(eta_a, cmap='RdYlBu', aspect='auto')
 plt.xticks(range(0,nc,5), range(0,nc,5))
 plt.yticks(range(2), ['ac', 'ab'])
-plt.show()
+#plt.show()
 
 for n in range(0, maxIter):
-    # Channel cells slope update
-    S_ab[1:-1] = (eta_ab[:-1]-eta_ab[1:])/dx
-    S_ac[1:-1] = (eta_ac[:-1]-eta_ac[1:])/dx
-    S_ab[-1] = S_ab[-2]
-    S_ac[-1] = S_ac[-2]
+    # Channel cells slope and inlet step update
+    S_ab[1:-1]    = (eta_ab[:-1]-eta_ab[1:])/dx
+    S_ac[1:-1]    = (eta_ac[:-1]-eta_ac[1:])/dx
+    S_ab[-1]      = S_ab[-2]
+    S_ac[-1]      = S_ac[-2]
+    deltaEta[:-1] = (eta_ab[:]-eta_ac[:])/D0
+    deltaEta[-1]  = deltaEta[-2]
 
-    # Downstream BC
-    if dsBC == 0:
-        D_ab[-1] = Hd_ab[-1] - eta_ab[-1]
-        D_ac[-1] = Hd_ac[-1] - eta_ac[-1]
+    #? Downstream BC: H(t)=H0
+    D_ab[-1] = H0-eta_ab[-1]-S_ab[-1]*dx
+    D_ac[-1] = H0-eta_ac[-1]-S_ac[-1]*dx
+    D_a[-1]  = (D_ab[-1]+D_ac[-1])/2
 
     # Solve the governing system to compute the unknowns D_ab[i], D_ac[i], Q_ab[i], Q_ac[i] and Qy[i]
-    # along the portion of semichannels ab and ac influenced by the bar
-    for i in range(nc, 1, -1):
-        """
-        x = opt.fsolve(fSysSC, x, (D0, Q0, D_ab[i], D_ac[i], Q_ab[i], Q_ac[i], (S_ab[i]+S_ab[i-1])/2, 
-            (S_ac[i]+S_ac[i-1])/2, W_ab, W_ac, (eta_ab[i-1]+eta_ab[i-2])/2, (eta_ac[i-1]+eta_ac[i-2])/2,
-             g, d50, dx, ks0, C0, RF), xtol=tol)[:5]
-        D_ab[i-1], D_ac[i-1], Q_ab[i-1], Q_ac[i-1], Q_y[i-1] = (x[0]*D0, x[1]*D0, x[2]*Q0, x[3]*Q0, x[4]*Q0)
-        """
-        A, B = coeffSysSC(D_ab[i], D_ac[i], Q_ab[i], Q_ac[i], (S_ab[i]+S_ab[i-1])/2, 
-            (S_ac[i]+S_ac[i-1])/2, W_ab, W_ac, (eta_ab[i-1]+eta_ab[i-2])/2, (eta_ac[i-1]+eta_ac[i-2])/2,
-             g, d50, dx, ks0, C0, RF)
-        x = np.linalg.solve(A, B)
-        Q_y[i-1], D_ab[i-1], D_ac[i-1], Q_ab[i-1], Q_ac[i-1] = x
-        if eta_ab[i-2] == eta_ac[i-2] and D_ab[i-1] == D_ac[i-1] and Q_ab[i-1] == Q_ac[i-1]:
-            break 
-    
-    # Water depth update in channel a, upstream the bar    
-    D_ab[:i-1] = buildProfile(RF, (D_ab[i-1]+D_ac[i-1])/2, Q0, W_a, S_ab[:i-1], d50, dx, g, ks0, C0, eps_c)
-    D_ac[:i-1] = D_ab[:i-1]
-    Q_ab[:i-1] = Q0/2
-    Q_ac[:i-1] = Q0/2
+    for i in range(nc-1, -1, -1):
+        Q_y[i] = QyUpdate(D0, Q0, D_ab[i+1], D_ac[i+1], Q_ab[i+1], Q_ac[i+1], S_ab[i+1], S_ac[i+1], 
+            deltaEta[i], deltaEta[i+1], W_ab, W_ac, g, d50, dx, ks0, C0, RF)
+        D_a[i] = DaUpdate(D_ab[i+1], D_ac[i+1], Q_ab[i+1], Q_ac[i+1], Q_y[i], S_ab[i+1], S_ac[i+1], 
+            W_ab, W_ac, g, d50, dx, ks0, C0, RF)
+        D_ab[i] = D_a[i]-deltaEta[i]*D0/2
+        D_ac[i] = D_a[i]+deltaEta[i]*D0/2
+        Q_ab[i] = Q_ab[i+1]-Q_y[i]
+        Q_ac[i] = Q_ac[i+1]+Q_y[i]
 
     # Shields parameter update
     Theta_ab = shieldsUpdate(RF, Q_ab, W_ab, D_ab, d50, g, delta, ks0, C0, eps_c)
@@ -154,8 +142,8 @@ for n in range(0, maxIter):
     Qs_y[:] = (Qs_ab[:-1]+Qs_ac[:-1])*(Q_y/Q0-2*r*dx/(W_a*Theta_a_avg[:-1]**0.5)*(eta_ab-eta_ac)/W_a)
 
     # Apply Exner equation to update node cells elevation
-    eta_ab += dt*(Qs_ab[:-1]-Qs_ab[1:]+Qs_y)/((1-p)*W_ab*dx)
-    eta_ac += dt*(Qs_ac[:-1]-Qs_ac[1:]-Qs_y)/((1-p)*W_ac*dx)
+    eta_ab += dt*(Qs_ab[:-1]-Qs_ab[1:]+Qs_y[:])/((1-p)*W_ab*dx)
+    eta_ac += dt*(Qs_ac[:-1]-Qs_ac[1:]-Qs_y[:])/((1-p)*W_ac*dx)
 
     # Time update + end-time condition for the simulation's end
     t.append(t[-1]+dt)
@@ -165,7 +153,7 @@ for n in range(0, maxIter):
 
     # Print elapsed time
     if n % 50 == 0:
-        print("Elapsed time = %4.1f Tf, i = %d" % (t[n] / Tf, i))
+        print("Elapsed time = %4.1f Tf" % (t[n] / Tf))
 
     
 # Plot semichannels bed elevation values
