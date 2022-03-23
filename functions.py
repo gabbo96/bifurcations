@@ -432,3 +432,20 @@ def coeffSysSC(D_abV, D_acV, Q_abV, Q_acV, S_ab, S_ac, w_ab, w_ac, eta_ab, eta_a
                   [0,1,-1,0,0]])
     B = np.array([-D_abV/dx+(S_ab-j_ab)/(1-Fr_ab**2), -D_acV/dx+(S_ac-j_ac)/(1-Fr_ac**2), Q_abV, Q_acV, -eta_ab+eta_ac])
     return A, B
+
+def QyUpdate(D0, Q0, D_abV, D_acV, Q_abV, Q_acV, S_abV, S_acV, deltaEtaM, deltaEtaV, w_ab, w_ac, g, d50, dx, ks0, c0, rf):
+    j_abV  = uniFlowS(rf, Q_abV, w_ab, D_abV, d50, g, ks0, c0, 2.5)
+    j_acV  = uniFlowS(rf, Q_acV, w_ac, D_acV, d50, g, ks0, c0, 2.5)
+    Fr_abV = Q_abV/(w_ab*D_abV)/(g*D_abV)**0.5    
+    Fr_acV = Q_acV/(w_ac*D_acV)/(g*D_acV)**0.5
+    return Q0*(((S_abV-j_abV)/(1-Fr_abV**2)-(S_acV-j_acV)/(1-Fr_acV**2))*dx/D0-(deltaEtaM-deltaEtaV))/(Q_abV/(g*w_ab**2*D_abV**2)/(1-Fr_abV**2)+Q_acV/(g*w_ac**2*D_acV**2)/(1-Fr_acV**2)*Q0/D0)
+
+def DaUpdate(D_abV, D_acV, Q_abV, Q_acV, Q_y, S_abV, S_acV, w_ab, w_ac, g, d50, dx, ks0, c0, rf):
+    j_abV  = uniFlowS(rf, Q_abV, w_ab, D_abV, d50, g, ks0, c0, 2.5)
+    j_acV  = uniFlowS(rf, Q_acV, w_ac, D_acV, d50, g, ks0, c0, 2.5)
+    Fr_abV = Q_abV/(w_ab*D_abV)/(g*D_abV)**0.5    
+    Fr_acV = Q_acV/(w_ac*D_acV)/(g*D_acV)**0.5
+    D_aV   = (D_abV+D_acV)/2
+    return D_aV-((S_abV-j_abV)/(1-Fr_abV**2)+(S_acV-j_acV)/(1-Fr_acV**2))*dx/2+Q_y/2*(Q_abV/(g*w_ab**2*D_abV**2)/(1-Fr_abV**2)-Q_acV/(g*w_ac**2*D_acV**2)/(1-Fr_acV**2))
+    
+    
