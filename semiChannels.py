@@ -11,18 +11,18 @@ numMaxPlots = 10000  # maximum number of branches' bed evolution plots during ti
 iterationPlotStep = 10
 
 # Model settings
-Qasymm = 1.01  # downstream BC: Q_ab[-1]=Q0/2*Qasymm
+Qasymm = 1.05  # downstream BC: Q_ab[-1]=Q0/2*Qasymm
 tend = 0.5
 eq_it_max = int(1e4)
 
 # Hydraulic parameters
 RF     = 'ks' # flow resistance formula. Available options: 'ks' (Gauckler&Strickler), 'C' (Chézy)
-ks0    = 0 # if =0, it is computed using Gauckler&Strickler formula; otherwise it's considered a constant
+ks0    = 30 # if =0, it is computed using Gauckler&Strickler formula; otherwise it's considered a constant
 C0     = 0 # if =0, it is computed using a logarithmic formula; otherwise it's considered a constant
 eps_c  = 2.5 # Chézy logarithmic formula coefficient
 TF     = 'P90' # sediment transport formula. Available options: 'P78' (Parker, 1978), 'MPM' (Meyer-Peter&Mueller, 1948),
 # 'P90' (Parker, 1990), 'EH' (Engelund&Hansen)
-Ls     = 3000 # =L/D0, L=branches' dimensional length
+Ls     = 1000 # =L/D0, L=branches' dimensional length
 beta0  = 25
 theta0 = 0.1
 ds0    = 0.01 # =d50/D0
@@ -33,8 +33,8 @@ r      = 0.5 # Ikeda parameter
 inStep = -5e-4 # imposed initial inlet step = (eta_bn - eta_cn)/D0
 
 # Numerical parameters
-dt      = 100 # timestep [s] (complete model only)
-nc      = 30 # branches' number of cells
+dt      = 100 # timestep [s]
+nc      = 1000 # branches' number of cells
 maxIter = int(1e5) # max number of iterations during time evolution
 tol     = 1e-6 # Newton method tolerance
 
@@ -81,7 +81,7 @@ Qs_y      = np.zeros(nc)
 # IC
 t        :list = [0]
 dx        = Ls*D0/nc
-eta_ab   [:] = np.linspace(0, -S0*dx*nc, num=len(eta_ab))
+eta_ab   [:] = np.linspace(0, -S0*dx*(nc-1), num=len(eta_ab))
 eta_ac   [:] = eta_ab[:]
 eta_ab_ic[:] = eta_ab[:]
 eta_ac_ic[:] = eta_ac[:]
@@ -110,13 +110,13 @@ for n in range(0, maxIter):
     deltaEta[-1]  = deltaEta[-2]
 
     #? Downstream BC: H(t)=H0
-    D_ab[-1] = H0-eta_ab[-1]-S_ab[-1]*dx
-    D_ac[-1] = H0-eta_ac[-1]-S_ac[-1]*dx
+    D_ab[-1] = H0-eta_ab[-1]+S_ab[-1]*dx
+    D_ac[-1] = H0-eta_ac[-1]+S_ac[-1]*dx
     D_a[-1]  = (D_ab[-1]+D_ac[-1])/2
 
     # Solve the governing system to compute the unknowns D_ab[i], D_ac[i], Q_ab[i], Q_ac[i] and Qy[i]
     for i in range(nc-1, -1, -1):
-        Q_y[i] = QyUpdate(D0, Q0, D_ab[i+1], D_ac[i+1], Q_ab[i+1], Q_ac[i+1], S_ab[i+1], S_ac[i+1], 
+        Q_y[i] = -QyUpdate(D0, Q0, D_ab[i+1], D_ac[i+1], Q_ab[i+1], Q_ac[i+1], S_ab[i+1], S_ac[i+1], 
             deltaEta[i], deltaEta[i+1], W_ab, W_ac, g, d50, dx, ks0, C0, RF)
         D_a[i] = DaUpdate(D_ab[i+1], D_ac[i+1], Q_ab[i+1], Q_ac[i+1], Q_y[i], S_ab[i+1], S_ac[i+1], 
             W_ab, W_ac, g, d50, dx, ks0, C0, RF)
