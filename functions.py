@@ -1,5 +1,6 @@
 from cmath import sqrt
 from matplotlib import pyplot as plt
+from pyrsistent import b
 from scipy import optimize as opt
 import numpy as np
 
@@ -42,15 +43,15 @@ def uniFlowD(rf, q, w, s, d50, g, ks, c, eps_c, d0):
 
 
 def uniFlowS(rf, q, w, d, d50, g, ks, c, eps_c):
-    # Uniform/gradually varying flow bed/energy slope computation
+    # Uniform/gradually varying flow bed/energy slope computation (wide rectangular cross-section hypothesis is made)
     if rf == 'ks':
         if ks == 0:
-            ks = 21.1 / (d50 ** (1 / 6))  # Gauckler & Strickler formula
-        return (q / (w * ks * d ** (5 / 3))) ** 2
+            ks = 21.1/(d50**(1/6))  # Gauckler & Strickler formula
+        return (q/(w*ks*d**(5/3)))**2
     elif rf == 'C':
         if c == 0:
-            c = 6 + 2.5 * np.log(d / (eps_c * d50))
-        return (q / (w * c * g ** 0.5 * d ** 1.5)) ** 2
+            c = 6+2.5*np.log(d/(eps_c*d50))
+        return (q/(w*c*g**0.5*d**1.5))**2
     else:
         print('Input error: accepted values for RF are "C" and "ks".')
         return -1
@@ -434,11 +435,19 @@ def coeffSysSC(D_abV, D_acV, Q_abV, Q_acV, S_ab, S_ac, w_ab, w_ac, eta_ab, eta_a
     return A, B
 
 def QyUpdate(D0, Q0, D_abV, D_acV, Q_abV, Q_acV, S_abV, S_acV, deltaEtaM, deltaEtaV, w_ab, w_ac, g, d50, dx, ks0, c0, rf):
+    Omega_abV = w_ab*D_abV
+    Omega_acV = w_ac*D_acV
     j_abV  = uniFlowS(rf, Q_abV, w_ab, D_abV, d50, g, ks0, c0, 2.5)
     j_acV  = uniFlowS(rf, Q_acV, w_ac, D_acV, d50, g, ks0, c0, 2.5)
-    Fr_abV = Q_abV/(w_ab*D_abV)/(g*D_abV)**0.5    
-    Fr_acV = Q_acV/(w_ac*D_acV)/(g*D_acV)**0.5
-    return Q0*(((S_abV-j_abV)/(1-Fr_abV**2)-(S_acV-j_acV)/(1-Fr_acV**2))*dx/D0-(deltaEtaM-deltaEtaV))/(Q_abV/(g*w_ab**2*D_abV**2)/(1-Fr_abV**2)+Q_acV/(g*w_ac**2*D_acV**2)/(1-Fr_acV**2)*Q0/D0)
+    Fr_abV = Q_abV/Omega_abV/(g*D_abV)**0.5    
+    Fr_acV = Q_acV/Omega_acV/(g*D_acV)**0.5
+    a = (S_abV-j_abV)/(1-Fr_abV**2)
+    b = (S_acV-j_acV)/(1-Fr_acV**2)
+    c = deltaEtaV-deltaEtaM
+    d = 1/(g*Omega_abV*(1-Fr_abV**2))*(3/2*Q_abV/Omega_abV-1/2*Q_acV/Omega_acV)
+    e = 1/(g*Omega_acV*(1-Fr_acV**2))*(3/2*Q_acV/Omega_acV-1/2*Q_abV/Omega_abV)
+    return Q0*((a-b)*dx/D0+c)/((d+e)*Q0/D0)
+#    return dx*((S_abV-j_abV)/(1-Fr_abV**2)-(S_acV-j_acV)/(1-Fr_acV**2)+D0/dx*(deltaEtaV-deltaEtaM))/(Q_abV/(g*w_ab**2*D_abV**2)/(1-Fr_abV**2)+Q_acV/(g*w_ac**2*D_acV**2)/(1-Fr_acV**2))
 
 def DaUpdate(D_abV, D_acV, Q_abV, Q_acV, Q_y, S_abV, S_acV, w_ab, w_ac, g, d50, dx, ks0, c0, rf):
     j_abV  = uniFlowS(rf, Q_abV, w_ab, D_abV, d50, g, ks0, c0, 2.5)

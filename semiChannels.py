@@ -1,4 +1,5 @@
 import time
+import matplotlib
 import numpy as np
 from functions import *
 
@@ -6,37 +7,33 @@ from functions import *
 # INPUTS AND MODEL SETTINGS
 # -------------------------
 
-# I/O settings
-numMaxPlots = 10000  # maximum number of branches' bed evolution plots during time evolution
-iterationPlotStep = 10
-
 # Model settings
-Qasymm = 1.05  # downstream BC: Q_ab[-1]=Q0/2*Qasymm
-tend = 0.5
-eq_it_max = int(1e4)
+st        = 0  # Solid transport switch: 0=fixed bed; 1=movable bed
+H0coeff   = 0.1  # =(Hd-H0)/D0, where H0 is the wse associated to D0 and Hd is the imposed downstream BC
+
+# Numerical parameters
+dt      = 50 # timestep [s]
+dx      = 100  # cell length [m]
+tend    = 3
+maxIter = 5000 # max number of iterations during time evolution
+tol     = 1e-6 # Newton method tolerance
 
 # Hydraulic parameters
-RF     = 'ks' # flow resistance formula. Available options: 'ks' (Gauckler&Strickler), 'C' (Chézy)
-ks0    = 30 # if =0, it is computed using Gauckler&Strickler formula; otherwise it's considered a constant
+RF     = 'C' # flow resistance formula. Available options: 'ks' (Gauckler&Strickler), 'C' (Chézy)
+ks0    = 0 # if =0, it is computed using Gauckler&Strickler formula; otherwise it's considered a constant
 C0     = 0 # if =0, it is computed using a logarithmic formula; otherwise it's considered a constant
 eps_c  = 2.5 # Chézy logarithmic formula coefficient
-TF     = 'P90' # sediment transport formula. Available options: 'P78' (Parker, 1978), 'MPM' (Meyer-Peter&Mueller, 1948),
-# 'P90' (Parker, 1990), 'EH' (Engelund&Hansen)
-Ls     = 1000 # =L/D0, L=branches' dimensional length
+TF     = 'P90' # sediment transport formula. Available options: 'P78' (Parker78), 'MPM', 'P90' (Parker90), 'EH' (Engelund&Hansen)
+Ls     = 3000 # =L/D0, L=branches' dimensional length
 beta0  = 25
-theta0 = 0.1
+theta0 = 0.08
 ds0    = 0.01 # =d50/D0
 rW     = 0.5 # =Wb/W_a, where Wb=Wc and W_a=upstream channel width
 d50    = 0.01 # median sediment diameter [m]
 p      = 0.6 # bed porosity
 r      = 0.5 # Ikeda parameter
-inStep = -5e-4 # imposed initial inlet step = (eta_bn - eta_cn)/D0
 
-# Numerical parameters
-dt      = 100 # timestep [s]
-nc      = 1000 # branches' number of cells
-maxIter = int(1e5) # max number of iterations during time evolution
-tol     = 1e-6 # Newton method tolerance
+
 
 # Physical constants
 delta = 1.65
@@ -54,6 +51,7 @@ phi00, phiD0, phiT0 = phis_scalar(theta0, TF, D0, d50)
 Q0    = uniFlowQ(RF, W_a, S0, D0, d50, g, ks0, C0, eps_c)
 Qs0   = W_a*np.sqrt(g*delta*d50 ** 3)*phi00
 Fr0   = Q0/(W_a*D0*np.sqrt(g*D0))
+nc    = int(Ls*D0/dx)
 
 # Exner time computation
 Tf = (1 - p)*W_a*D0/(Qs0/W_a)
@@ -78,27 +76,23 @@ Qs_ab     = np.zeros(nc+1)
 Qs_ac     = np.zeros(nc+1)
 Qs_y      = np.zeros(nc)
 
+# Space-time domain
+xi = np.linspace(0,nc*dx,nc+1)  # cell interfaces coordinates
+xc = np.linspace(dx/2,nc*dx-dx/2,nc) # cell centroids coordinates
+t:list = [0]
+
 # IC
-t        :list = [0]
-dx        = Ls*D0/nc
-eta_ab   [:] = np.linspace(0, -S0*dx*(nc-1), num=len(eta_ab))
-eta_ac   [:] = eta_ab[:]
+eta_ab[:]    = np.linspace(0, -S0*dx*(nc-1), num=len(eta_ab))
+eta_ac[:]    = eta_ab[:]
 eta_ab_ic[:] = eta_ab[:]
 eta_ac_ic[:] = eta_ac[:]
-W_ab      = W_a/2
-W_ac      = W_a/2
-Q_ab[-1] = Q0/2*Qasymm
-Q_ac[-1] = Q0-Q_ab[-1]
+W_ab         = W_a/2
+W_ac         = W_a/2
+Q_ab[:]      += Q0/2
+Q_ac[:]      += Q0/2
 
 # Downstream BC
-H0 = eta_ab[-1]-S0*dx+D0
-
-# Plot semichannels bed elevation values
-eta_a = np.vstack([eta_ac-eta_ac_ic, eta_ab-eta_ab_ic])
-plt.imshow(eta_a, cmap='RdYlBu', aspect='auto')
-plt.xticks(range(0,nc,5), range(0,nc,5))
-plt.yticks(range(2), ['ac', 'ab'])
-#plt.show()
+H0 = (eta_ab[-1]-S0*dx+D0)+D0*H0coeff
 
 for n in range(0, maxIter):
     # Channel cells slope and inlet step update
@@ -109,16 +103,16 @@ for n in range(0, maxIter):
     deltaEta[:-1] = (eta_ab[:]-eta_ac[:])/D0
     deltaEta[-1]  = deltaEta[-2]
 
-    #? Downstream BC: H(t)=H0
+    # Downstream BC: H(t)=H0
     D_ab[-1] = H0-eta_ab[-1]+S_ab[-1]*dx
     D_ac[-1] = H0-eta_ac[-1]+S_ac[-1]*dx
     D_a[-1]  = (D_ab[-1]+D_ac[-1])/2
 
     # Solve the governing system to compute the unknowns D_ab[i], D_ac[i], Q_ab[i], Q_ac[i] and Qy[i]
     for i in range(nc-1, -1, -1):
-        Q_y[i] = -QyUpdate(D0, Q0, D_ab[i+1], D_ac[i+1], Q_ab[i+1], Q_ac[i+1], S_ab[i+1], S_ac[i+1], 
+        Q_y[i]  = QyUpdate(D0, Q0, D_ab[i+1], D_ac[i+1], Q_ab[i+1], Q_ac[i+1], S_ab[i+1], S_ac[i+1], 
             deltaEta[i], deltaEta[i+1], W_ab, W_ac, g, d50, dx, ks0, C0, RF)
-        D_a[i] = DaUpdate(D_ab[i+1], D_ac[i+1], Q_ab[i+1], Q_ac[i+1], Q_y[i], S_ab[i+1], S_ac[i+1], 
+        D_a[i]  = DaUpdate(D_ab[i+1], D_ac[i+1], Q_ab[i+1], Q_ac[i+1], Q_y[i], S_ab[i+1], S_ac[i+1], 
             W_ab, W_ac, g, d50, dx, ks0, C0, RF)
         D_ab[i] = D_a[i]-deltaEta[i]*D0/2
         D_ac[i] = D_a[i]+deltaEta[i]*D0/2
@@ -129,21 +123,20 @@ for n in range(0, maxIter):
     Theta_ab = shieldsUpdate(RF, Q_ab, W_ab, D_ab, d50, g, delta, ks0, C0, eps_c)
     Theta_ac = shieldsUpdate(RF, Q_ac, W_ac, D_ac, d50, g, delta, ks0, C0, eps_c)
 
-    # Solid discharge computation
-    Qs_ab = W_ab*np.sqrt(g*delta*d50**3)*phis(Theta_ab, TF, D0, d50)[0]
-    Qs_ac = W_ac*np.sqrt(g*delta*d50**3)*phis(Theta_ac, TF, D0, d50)[0]
-
-    # Impose the second upstream BC
-    Qs_ab[0] = Qs0/2
-    Qs_ac[0] = Qs0/2
-
-    # Compute transverse solid discharge along channel a
-    Theta_a_avg = shieldsUpdate(RF, Q0, W_a, (D_ab+D_ac)/2, d50, g, delta, ks0, C0, eps_c)
-    Qs_y[:] = (Qs_ab[:-1]+Qs_ac[:-1])*(Q_y/Q0-2*r*dx/(W_a*Theta_a_avg[:-1]**0.5)*(eta_ab-eta_ac)/W_a)
-
-    # Apply Exner equation to update node cells elevation
-    eta_ab += dt*(Qs_ab[:-1]-Qs_ab[1:]+Qs_y[:])/((1-p)*W_ab*dx)
-    eta_ac += dt*(Qs_ac[:-1]-Qs_ac[1:]-Qs_y[:])/((1-p)*W_ac*dx)
+    # Solid discharge computation + exner
+    if st==1:
+        # Qsx along the semichannels
+        Qs_ab = W_ab*np.sqrt(g*delta*d50**3)*phis(Theta_ab, TF, D0, d50)[0]
+        Qs_ac = W_ac*np.sqrt(g*delta*d50**3)*phis(Theta_ac, TF, D0, d50)[0]
+        # Second upstream BC
+        Qs_ab[0] = Qs0/2
+        Qs_ac[0] = Qs0/2
+        # Transverse solid discharge along channel a
+        Theta_a_avg = shieldsUpdate(RF, Q0, W_a, (D_ab+D_ac)/2, d50, g, delta, ks0, C0, eps_c)
+        Qs_y[:] = (Qs_ab[:-1]+Qs_ac[:-1])*(Q_y/Q0-2*r*dx/(W_a*Theta_a_avg[:-1]**0.5)*(eta_ab-eta_ac)/W_a)
+        # Apply Exner equation to update node cells elevation
+        eta_ab += dt*(Qs_ab[:-1]-Qs_ab[1:]+Qs_y[:])/((1-p)*W_ab*dx)
+        eta_ac += dt*(Qs_ac[:-1]-Qs_ac[1:]-Qs_y[:])/((1-p)*W_ac*dx)
 
     # Time update + end-time condition for the simulation's end
     t.append(t[-1]+dt)
@@ -152,13 +145,46 @@ for n in range(0, maxIter):
         break
 
     # Print elapsed time
-    if n % 50 == 0:
+    if n % 500 == 0:
         print("Elapsed time = %4.1f Tf" % (t[n] / Tf))
 
     
 # Plot semichannels bed elevation values
-eta_a = np.vstack([eta_ac-eta_ac_ic, eta_ab-eta_ab_ic])
-plt.imshow(eta_a, cmap='RdYlBu', aspect='auto')
-plt.xticks(range(0,nc,5), range(0,nc,5))
+if st==1:
+    plt.figure(0)
+    eta_a = np.vstack([eta_ac-eta_ac_ic, eta_ab-eta_ab_ic])
+    etamin = min(np.amin(eta_a),-np.amax(eta_a))
+    etamax = max(np.amax(eta_a),-np.amin(eta_a))
+    plt.imshow(eta_a, vmin=etamin, vmax=etamax, cmap='coolwarm', aspect='auto')
+    plt.xticks(range(0,nc,int(nc/10)), range(0,nc,int(nc/10)))
+    plt.yticks(range(2), ['ac', 'ab'])
+    plt.title('Bed elevation difference wrt IC')
+    plt.colorbar()
+    
+# Plot water depths in 2D
+plt.figure(1)
+Da_disp = np.vstack([D_ac, D_ab])
+Dmin = np.amin(Da_disp)
+Dmax = np.amax(Da_disp)
+if Dmax > Dmin+tol:
+    plt.imshow(Da_disp, cmap='Blues', vmin=Dmin-1/2*(Dmax-Dmin), vmax=Dmax, aspect='auto')
+else:
+    plt.imshow(Da_disp, cmap='Blues', aspect='auto')
+plt.xticks(range(0,nc,int(nc/10)), range(0,nc,int(nc/10)))
 plt.yticks(range(2), ['ac', 'ab'])
+plt.title('Water depth [m]')
+plt.colorbar()
+
+# Plot mean water depth longitudinal profile
+myPlot(2,xi,D_a,'Mean water depth','Cross-section-averaged water depth along the channel','x [m]','D_a [m]')
+
+# Plot water discharges in 2D
+plt.figure(3)
+Qa_disp = np.vstack([Q_ac, Q_ab])
+plt.imshow(Qa_disp, cmap='Purples', vmin=Q0/4, vmax=2/3*Q0, aspect='auto')
+plt.xticks(range(0,nc,int(nc/10)), range(0,nc,int(nc/10)))
+plt.yticks(range(2), ['ac', 'ab'])
+plt.title('Water discharge [m^3/s]')
+plt.colorbar()
+
 plt.show()
