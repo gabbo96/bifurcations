@@ -3,6 +3,7 @@ from matplotlib import pyplot as plt
 from pyrsistent import b
 from scipy import optimize as opt
 import numpy as np
+import math
 
 
 def uniFlowQ(rf, w, s, d, d50, g, ks, c, eps_c):
@@ -29,8 +30,6 @@ def chezySys(d, q, w, s, d50, g, eps_c):
 def uniFlowD(rf, q, w, s, d50, g, ks, c, eps_c, d0):
     # Uniform/gradually varying flow water depth computation
     if rf == 'ks':
-        if ks == 0:
-            ks = 21.1 / (d50 ** (1 / 6))  # Gauckler & Strickler formula
         return (q / (w * ks * np.sqrt(s))) ** (3 / 5)
     elif rf == 'C':
         if c == 0:
@@ -45,8 +44,6 @@ def uniFlowD(rf, q, w, s, d50, g, ks, c, eps_c, d0):
 def uniFlowS(rf, q, w, d, d50, g, ks, c, eps_c):
     # Uniform/gradually varying flow bed/energy slope computation (wide rectangular cross-section hypothesis is made)
     if rf == 'ks':
-        if ks == 0:
-            ks = 21.1/(d50**(1/6))  # Gauckler & Strickler formula
         return (q/(w*ks*d**(5/3)))**2
     elif rf == 'C':
         if c == 0:
@@ -65,54 +62,11 @@ def fSys(q_b, rf, ddb, ddc, d0, inStep, qu, w_b, w_c, s_b, s_c, d50, dx, g, ks, 
     # return (d_b[0] - d_c[0]) / d0 + inStep  # equal wse at branch inlets
     return (d_b[0] - d_c[0] + inStep * d0) / ((d_b[0] + d_c[0]) / 2)
 
-
-# Computes phi0 (dimensionless solid discharge), phiT, phiD [Redolfi et al., 2019], given scalar values of theta and D
-def phis_scalar(theta, tf, d0, d50):
-    phi0 = 0
-    phiD = 0
-    phiT = 0
-    if tf == 'MPM':
-        theta_cr = 0.047
-        if theta > theta_cr:
-            phi0 = 8 * (theta - theta_cr) ** 1.5
-            phiT = 1.5 * theta / (theta - theta_cr)
-    elif tf == 'EH':
-        c = 6 + 2.5 * np.log(d0 / (2.5 * d50))
-        cD = 2.5 / c
-        phi0 = 0.05 * c ** 2 * theta ** 2.5
-        phiD = 2 * cD
-        phiT = 2.5
-    elif tf == 'P90':  # Parker (1990)
-        A = 0.0386
-        B = 0.853
-        C = 5474
-        D = 0.00218
-        x = theta / A
-        if x > 1.59:
-            phi0 = C * D * theta ** 1.5 * (1 - B / x) ** 4.5
-            Phi_der = 1.5 * theta ** 0.5 * (1 - B / x) ** 4.5 * C * D + 4.5 * A * B * (1. - B / x) ** 3.5 * C * D / (
-                        theta ** 0.5)
-        elif x >= 1:
-            phi0 = D * theta ** 1.5 * (np.exp(14.2 * (x - 1) - 9.28 * (x - 1) ** 2))
-            Phi_der = 1. / A * phi0 * (14.2 - 9.28 * 2. * (x - 1.)) + 1.5 * phi0 / theta
-        else:
-            phi0 = D * theta ** 1.5 * x ** 14.2
-            Phi_der = 14.2 / A * D * theta ** 1.5 * x ** 13.2 + D * x ** 14.2 * 1.5 * theta ** 0.5
-        phiT = theta / phi0 * Phi_der
-    elif tf == 'P78':  # Parker (1978)
-        theta_cr = 0.03
-        phi0 = 11.2 * theta ** 1.5 * (1 - theta_cr / theta) ** 4.5
-        phiT = 1.5 + 4.5 * theta_cr / (theta - theta_cr)
-    else:
-        print('error: unknown transport formula')
-        phi0 = None
-    return phi0, phiD, phiT
-
-
 # Computes phi and phiT given array values of theta and D
 def phis(theta, tf, d0, d50):
-    phi = np.zeros(len(theta))
-    phiT = np.zeros(len(theta))
+    phi  = np.zeros(np.size(theta))
+    phiD = np.zeros(np.size(theta))
+    phiT = np.zeros(np.size(theta))
     if tf == 'MPM':  # Meyer-Peter and Muller (1948)
         theta_cr = 0.047
         nst = theta < theta_cr
@@ -120,8 +74,9 @@ def phis(theta, tf, d0, d50):
         phiT[nst] = None
         phiT[~nst] = 1.5 * theta[~nst] / (theta[~nst] - theta_cr)
     elif tf == 'EH':  # Engelund & Hansen
-        c = 6 + 2.5 * np.log(d0 / (2.5 * d50))
-        phi = 0.05 * c ** 2 * theta ** 2.5
+        c = 6+2.5*np.log(d0/(2.5*d50))
+        phi = 0.05*c**2*theta**2.5
+        phiD = 2*2.5/c
         phiT = 2.5
     elif tf == 'P90':  # Parker (1990)
         a = 0.0386
@@ -143,7 +98,7 @@ def phis(theta, tf, d0, d50):
         print('error: unknown transport formula')
         phi = None
         phiT = None
-    return phi, phiT
+    return phi, phiD, phiT
 
 
 def betaR_MR(rf, theta, ds, r, phiD, phiT, eps_c):
@@ -179,34 +134,33 @@ def landau(time_landau, rq_0, k2, omega):
 
 
 def buildProfile(rf, dd, q, w, s, d50, dx, g, ks, c, eps_c):
-    # Computes the water profiles in subcritical regime, starting from the downstream boundary conditions. The mean bed
-    # slope between two adjacent cells is used to approximate S in the equation; if the first (last) element of the
-    # slope array is not defined (i.e. equal to 0), only the second (second last) array element is used instead.
-    d = np.zeros(len(s))
-    d[-1] = dd
-    for i_index in range(len(s) - 1, 0, -1):
-        j = uniFlowS(rf, q, w, d[i_index], d50, g, ks, c, eps_c)
-        Fr = q / (w * d[i_index] * np.sqrt(g * d[i_index]))
-        if Fr > 1:
-            print("Warning: supercritical flow")
-        if s[i_index] * s[i_index - 1] != 0:
-            d[i_index - 1] = d[i_index] - dx * ((s[i_index] + s[i_index - 1]) / 2 - j) / (1 - Fr ** 2)
-        elif s[i_index] == 0:
-            d[i_index - 1] = d[i_index] - dx * (s[i_index - 1] - j) / (1 - Fr ** 2)
-        else:
-            d[i_index - 1] = d[i_index] - dx * (s[i_index] - j) / (1 - Fr ** 2)
-    return d
-
-def buildProfile_minmod(rf, dd, q, w, s, d50, dx, g, ks, c, eps_c):
     d = np.zeros(len(s)+1)
     d[-1] = dd
-    for i_index in range(len(s), 0, -1):
-        j = uniFlowS(rf, q, w, d[i_index], d50, g, ks, c, eps_c)
-        Fr = q / (w * d[i_index] * np.sqrt(g * d[i_index]))
+    for i in range(len(s), 0, -1):
+        j = uniFlowS(rf, q, w, d[i], d50, g, ks, c, eps_c)
+        Fr = q / (w * d[i] * np.sqrt(g * d[i]))
         if Fr > 1:
             print("Warning: supercritical flow")
-        d[i_index - 1] = d[i_index] - dx * (s[i_index-1] - j) / (1 - Fr ** 2)
+        d[i-1] = d[i]-dx*(s[i-1]-j)/(1-Fr**2)
     return d
+
+def profilesF(s, rf, q, w, d, d50, g, ks, c, eps_c):
+    j = uniFlowS(rf, q, w, d, d50, g, ks, c, eps_c)
+    Fr = q/(w*d*np.sqrt(g*d))
+    return (s-j)/(1-Fr**2)
+
+
+def buildProfile_rk4(rf, dd, q, w, s, d50, dx, g, ks, c, eps_c):
+    d = np.zeros(len(s)+1)
+    d[-1] = dd
+    for i in range(len(s), 0, -1):
+        k1 = profilesF(s[i-1], rf, q, w, d[i], d50, g, ks, c, eps_c)
+        k2 = profilesF(s[i-1], rf, q, w, d[i]-dx/2*k1, d50, g, ks, c, eps_c)
+        k3 = profilesF(s[i-1], rf, q, w, d[i]-dx/2*k2, d50, g, ks, c, eps_c)
+        k4 = profilesF(s[i-1], rf, q, w, d[i]-dx*k3, d50, g, ks, c, eps_c)
+        d[i-1] = d[i]-dx/6*(k1+2*k2+2*k3+k4)
+    return d
+
 
 def shieldsUpdate(rf, q, w, d, d50, g, delta, ks, c, eps_c):
     j = uniFlowS(rf, q, w, d, d50, g, ks, c, eps_c)
@@ -382,11 +336,13 @@ def interpolate(func, xData, yData, ic=None, bounds=(-np.inf, np.inf)):
     return par, intCurve, covar
 
 
-def fSysLocalUnsteady(q_b, s, w_b, w_c, ks, eta_bn, eta_cn, q_u):
-    q_c = q_u - q_b
-    d_b = (q_b / (w_b * ks * s ** 0.5)) ** (3/5)
-    d_c = (q_c / (w_c * ks * s ** 0.5)) ** (3/5)
-    return ((d_b + eta_bn) - (d_c + eta_cn)) / ((d_b + d_c) / 2)
+def fSysLocalUnsteady(q_b, eta_b, eta_c, s_b, s_c, w_b, w_c, q_u, g, d50, d0, rf, ks0, c0, eps_c):
+    # Returns the residual of the system of equations composed by continuity (q_b+q_c=q_u), uniform
+    # flow stage-discharge relationships and dH/dy=0
+    q_c = q_u-q_b
+    d_b = uniFlowD(rf, q_b, w_b, s_b, d50, g, ks0, c0, eps_c, d0)
+    d_c = uniFlowD(rf, q_c, w_c, s_c, d50, g, ks0, c0, eps_c, d0)
+    return ((d_b+eta_b)-(d_c+eta_c))/((d_b+d_c)/2)
 
 
 def eqSin(t, a, f, t0, b):
@@ -444,15 +400,15 @@ def coeffSysSC(D_abV, D_acV, Q_abV, Q_acV, S_ab, S_ac, w_ab, w_ac, eta_ab, eta_a
     B = np.array([-D_abV/dx+(S_ab-j_ab)/(1-Fr_ab**2), -D_acV/dx+(S_ac-j_ac)/(1-Fr_ac**2), Q_abV, Q_acV, -eta_ab+eta_ac])
     return A, B
 
-def QyDaUpdate(D0, Q0, D_abV, D_acV, Q_abV, Q_acV, S_abV, S_acV, deltaEtaM, deltaEtaV, w_ab, w_ac, g, d50, dx, ks0, c0, rf, eps_c):
+def QyDaUpdate(D0, Q0, D_abV, D_acV, Q_abV, Q_acV, S_ab, S_ac, deltaEtaM, deltaEtaV, w_ab, w_ac, g, d50, dx, ks0, c0, rf, eps_c):
     Omega_abV = w_ab*D_abV
     Omega_acV = w_ac*D_acV
     j_abV     = uniFlowS(rf, Q_abV, w_ab, D_abV, d50, g, ks0, c0, eps_c)
     j_acV     = uniFlowS(rf, Q_acV, w_ac, D_acV, d50, g, ks0, c0, eps_c)
     Fr_abV    = Q_abV/(Omega_abV*np.sqrt(g*D_abV))
     Fr_acV    = Q_acV/(Omega_acV*np.sqrt(g*D_acV))
-    a         = (S_abV-j_abV)/(1-Fr_abV**2)
-    b         = (S_acV-j_acV)/(1-Fr_acV**2)
+    a         = (S_ab-j_abV)/(1-Fr_abV**2)
+    b         = (S_ac-j_acV)/(1-Fr_acV**2)
     c         = deltaEtaV-deltaEtaM
     d         = 1/(g*Omega_abV*(1-Fr_abV**2))*(3/2*Q_abV/Omega_abV-1/2*Q_acV/Omega_acV)
     e         = 1/(g*Omega_acV*(1-Fr_acV**2))*(3/2*Q_acV/Omega_acV-1/2*Q_abV/Omega_abV)
@@ -465,5 +421,21 @@ def minmod(slope1,slope2):
     omega    = abs(slope1)<abs(slope2)
     limslope = omega*slope1+(1-omega)*slope2
     signch   = slope1*slope2>0
+    limslope = limslope*signch
+    return limslope
+
+def maxmod(slope1,slope2):
+    omega    = abs(slope1)>abs(slope2)
+    limslope = omega*slope1+(1-omega)*slope2
+    signch   = slope1*slope2>0
+    limslope = limslope*signch
+    return limslope
+
+def MCslope(slope1,slope2):
+    slopeC   = (slope1+slope2)/2
+    slopeabs = np.vstack([np.abs(slope1),np.abs(slope2),np.abs(slopeC)])
+    omega    = slopeabs==np.min(slopeabs,0)
+    limslope = np.diag(np.dot(omega.T,np.vstack((slope1,slope2,slopeC))))
+    signch   = (slope1*slope2>0)*(slopeC*slope2>0)
     limslope = limslope*signch
     return limslope
