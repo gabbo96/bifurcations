@@ -186,8 +186,8 @@ def fSys_BRT(x, dsBC, rf, tf, theta0, Q0, Qs0, w, l, d0, s0, w_b, w_c, d50, alph
         res = np.zeros((3,))
         theta_b = x[2] * s0 * x[0] / (delta * d50)
         theta_c = x[2] * s0 * x[1] / (delta * d50)
-        phi_b = phis_scalar(theta_b, tf, d0, d50)[0]
-        phi_c = phis_scalar(theta_c, tf, d0, d50)[0]
+        phi_b = phis(np.array([theta_b]), tf, d0, d50)[0]
+        phi_c = phis(np.array([theta_c]), tf, d0, d50)[0]
         qs_b = np.sqrt(g * delta * d50 ** 3) * phi_b
         qs_c = np.sqrt(g * delta * d50 ** 3) * phi_c
         q_b = uniFlowQ(rf, w_b, x[2] * s0, x[0], d50, g, ks, c, eps_c) / w_b
@@ -205,8 +205,8 @@ def fSys_BRT(x, dsBC, rf, tf, theta0, Q0, Qs0, w, l, d0, s0, w_b, w_c, d50, alph
         res = np.zeros((4,))
         theta_b = x[2] * s0 * x[0] / (delta * d50)
         theta_c = x[3] * s0 * x[1] / (delta * d50)
-        phi_b = phis_scalar(theta_b, tf, d0, d50)[0]
-        phi_c = phis_scalar(theta_c, tf, d0, d50)[0]
+        phi_b = phis(np.array([theta_b]), tf, d0, d50)[0]
+        phi_c = phis(np.array([theta_c]), tf, d0, d50)[0]
         qs_b = np.sqrt(g * delta * d50 ** 3) * phi_b
         qs_c = np.sqrt(g * delta * d50 ** 3) * phi_c
         q_b = uniFlowQ(rf, w_b, x[2] * s0, x[0], d50, g, ks, c, eps_c) / w_b
@@ -252,7 +252,7 @@ def betaC_BRT(nb, beta_max, dsBC, rf, tf, theta0, ds0, w_b, w_c, Ls, d50, alpha,
     # Hydraulic parameters
     d0 = d50 / ds0
     s0 = theta0 * delta * d50 / d0
-    phi0 = phis_scalar(theta0, tf, d0, d50)[0]
+    phi0 = phis(np.array([theta0]), tf, d0, d50)[0]
     qs0 = np.sqrt(g * delta * d50 ** 3) * phi0
     beta0 = np.linspace(0.5, beta_max, nb)
     rq = np.zeros(nb)
@@ -400,22 +400,23 @@ def coeffSysSC(D_abV, D_acV, Q_abV, Q_acV, S_ab, S_ac, w_ab, w_ac, eta_ab, eta_a
     B = np.array([-D_abV/dx+(S_ab-j_ab)/(1-Fr_ab**2), -D_acV/dx+(S_ac-j_ac)/(1-Fr_ac**2), Q_abV, Q_acV, -eta_ab+eta_ac])
     return A, B
 
-def QyDaUpdate(D0, Q0, D_abV, D_acV, Q_abV, Q_acV, S_ab, S_ac, deltaEtaM, deltaEtaV, w_ab, w_ac, g, d50, dx, ks0, c0, rf, eps_c):
-    Omega_abV = w_ab*D_abV
-    Omega_acV = w_ac*D_acV
-    j_abV     = uniFlowS(rf, Q_abV, w_ab, D_abV, d50, g, ks0, c0, eps_c)
-    j_acV     = uniFlowS(rf, Q_acV, w_ac, D_acV, d50, g, ks0, c0, eps_c)
-    Fr_abV    = Q_abV/(Omega_abV*np.sqrt(g*D_abV))
-    Fr_acV    = Q_acV/(Omega_acV*np.sqrt(g*D_acV))
-    a         = (S_ab-j_abV)/(1-Fr_abV**2)
-    b         = (S_ac-j_acV)/(1-Fr_acV**2)
+def QyDaUpdate(D0, Q0, D_ab, D_ac, Q_ab, Q_ac, S_ab, S_ac, deltaEtaM, deltaEtaV, w_ab, w_ac, g, d50, dx, ks0, c0, rf, eps_c):
+    Omega_abV = w_ab*D_ab
+    Omega_acV = w_ac*D_ac
+    j_ab     = uniFlowS(rf, Q_ab, w_ab, D_ab, d50, g, ks0, c0, eps_c)
+    j_ac     = uniFlowS(rf, Q_ac, w_ac, D_ac, d50, g, ks0, c0, eps_c)
+    Fr_ab    = Q_ab/(Omega_abV*np.sqrt(g*D_ab))
+    Fr_ac    = Q_ac/(Omega_acV*np.sqrt(g*D_ac))
+    deltaJ    = -j_ab/(1-Fr_ab**2)+j_ac/(1-Fr_ac**2)
+    deltaS    = S_ab/(1-Fr_ab**2)-S_ac/(1-Fr_ac**2)
+    a         = (S_ab-j_ab)/(1-Fr_ab**2)
+    b         = (S_ac-j_ac)/(1-Fr_ac**2)
     c         = deltaEtaV-deltaEtaM
-    d         = 1/(g*Omega_abV*(1-Fr_abV**2))*(3/2*Q_abV/Omega_abV-1/2*Q_acV/Omega_acV)
-    e         = 1/(g*Omega_acV*(1-Fr_acV**2))*(3/2*Q_acV/Omega_acV-1/2*Q_abV/Omega_abV)
+    d         = 1/(g*Omega_abV*(1-Fr_ab**2))*(3/2*Q_ab/Omega_abV-1/2*Q_ac/Omega_acV)
+    e         = 1/(g*Omega_acV*(1-Fr_ac**2))*(3/2*Q_ac/Omega_acV-1/2*Q_ab/Omega_abV)
     q_y       = Q0*((a-b)*dx/D0+c)/((d+e)*Q0/D0)
-    D_aV      = (D_abV+D_acV)/2
-    D_aM      = D_aV-(a+b)*dx/2+q_y/2*(d-e)
-    return q_y, D_aM
+    deltaDa   = -(a+b)*dx/2+q_y/2*(d-e)
+    return q_y, deltaDa
 
 def minmod(slope1,slope2):
     omega    = abs(slope1)<abs(slope2)
