@@ -5,15 +5,17 @@ from functions import *
 # -------------------------
 
 # Model settings
-st       = 0  # Solid transport switch: 0=fixed bed; 1=movable bed
-Hcoeff   = 0  # =(Hd-H0)/D0, where H0 is the wse associated to D0 and Hd is the imposed downstream BC
-bedBC    = 'exp'  # available options: 'exp' adds a gradual inlet step with an exponential trend, that causes
-# deltaEta[-1]=inStep; 'flat'
-numPlots = 20
+st        = 0 # Solid transport switch: 0=fixed bed; 1=movable bed
+Hcoeff    = 0 # =(Hd-H0)/D0, where H0 is the wse associated to D0 and Hd is the imposed downstream BC
+bedBC     = 'exp' # 'exp' adds a gradual inlet step with an exponential trend, so that deltaEta[-1]=inStep; 'flat'; 'lastCell'
+deltaQ_ds = 0.3363 # =(Q_ab[-1]-Q_ac[-1])/Q0
+D_b_eq    = 1.331
+inStep    = -0.682
+nIterQy   = 5
 
 # Numerical parameters
 dt      = 100  # timestep [s]
-dx      = 25  # cell length [m]
+dx      = 20  # cell length [m]
 tend    = 8
 maxIter = int(1e6)*st+1 # max number of iterations during time evolution
 tol     = 1e-6 # Newton method tolerance
@@ -24,19 +26,22 @@ ks0    = 0 # if =0, it is computed using Gauckler&Strickler formula; otherwise i
 C0     = 0 # if =0, it is computed using a logarithmic formula; otherwise it's considered a constant
 eps_c  = 2.5 # Chézy logarithmic formula coefficient
 TF     = 'P90' # sediment transport formula. Available options: 'P78' (Parker78), 'MPM', 'P90' (Parker90), 'EH' (Engelund&Hansen)
-Ls     = 900 # =L/D0, L=branches' dimensional length
-beta0  = 20
-theta0 = 0.08
+Ls     = 3000 # =L/D0, L=branches' dimensional length
+beta0  = 25
+theta0 = 0.1
 ds0    = 0.01 # =d50/D0
 rW     = 0.5 # =Wb/W_a, where Wb=Wc and W_a=upstream channel width
 d50    = 0.01 # median sediment diameter [m]
 p      = 0.6 # bed porosity
 r      = 0.5 # Ikeda parameter
-inStep = d50
+
 
 # Physical constants
 delta = 1.65
 g     = 9.81
+
+# I/O settings
+numPlots  = 20
 
 # ----------------------------------
 # IC & BC DEFINITION AND MODEL SETUP
@@ -48,9 +53,9 @@ if ks0 == 0:
 S0    = theta0*delta*ds0
 D0    = d50/ds0
 W_a   = beta0*2*D0
-phi00, phiD0, phiT0 = phis_scalar(theta0, TF, D0, d50)
+phi00, phiD0, phiT0 = phis(np.array([theta0]), TF, D0, d50)
 Q0    = uniFlowQ(RF, W_a, S0, D0, d50, g, ks0, C0, eps_c)
-Qs0   = W_a*np.sqrt(g*delta*d50 ** 3)*phi00
+Qs0   = W_a*np.sqrt(g*delta*d50**3)*phi00
 Fr0   = Q0/(W_a*D0*np.sqrt(g*D0))
 nc    = int(Ls*D0/dx)
 
@@ -99,8 +104,14 @@ t:list = [0]
 eta_ab[0,:]  = np.linspace(0,-S0*dx*(nc-1),num=len(eta_ab[0,:]))
 eta_ac[0,:]  = eta_ab[0,:]
 if bedBC == 'exp':
-    eta_ab[0,:]  -= inStep*np.exp(-(xc[-1]-xc[:])/(0.25*Ls*D0))
-    eta_ac[0,:]  += inStep*np.exp(-(xc[-1]-xc[:])/(0.25*Ls*D0))
+    eta_ab[0,:]  += inStep/2*D0*np.exp(-(xc[-1]-xc[:])/(0.25*Ls*D0))
+    eta_ac[0,:]  -= inStep/2*D0*np.exp(-(xc[-1]-xc[:])/(0.25*Ls*D0))
+elif bedBC == 'lastCell':
+    eta_ab[0,-1]  += inStep/2*D0
+    eta_ac[0,-1]  -= inStep/2*D0
+elif bedBC == 'Scost':
+    eta_ab[0,:]  = np.linspace(0,-S0*dx*(nc-1),num=len(eta_ab[0,:]))
+    eta_ac[0,:]  = np.linspace(0,-S0*dx*(nc-1),num=len(eta_ab[0,:]))
 eta_a[0,:]   = (eta_ab[0,:]+eta_ac[0,:])/2
 eta_ab_ic[:] = eta_ab[0,:]
 eta_ac_ic[:] = eta_ac[0,:]
@@ -110,22 +121,21 @@ W_ac         = W_a/2
 Q_ab[:]      += Q0/2
 Q_ac[:]      += Q0/2
 
-# Plot bed elevation IC
-eta_a_plot = np.vstack([eta_ac[0,:], eta_ab[0,:]])
-etamin     = min(np.amin(eta_a_plot), -np.amax(eta_a_plot))
-etamax     = max(np.amax(eta_a_plot), -np.amin(eta_a_plot))
+# Downstream BC: H(t)=H0
+H0 = eta_ab[0,-1]+D_b_eq
 
-if bedBC=='exp':
+# Plot bed elevation IC
+if bedBC != 'flat':
     myPlot(0,xc,eta_ab[0,:],'eta_ab')
     myPlot(0,xc,eta_ac[0,:],'eta_ac')
     plt.show()
 
 for n in range(0, maxIter):
     # Channel cells slope and inlet step update
-    S_ab[1:-1]      = ((eta_ab[n,:-2]-eta_ab[n,1:-1])/dx+(eta_ab[n,1:-1]-eta_ab[n,2:])/dx)/2
+    S_ab[1:-1]      = (eta_ab[n,:-2]-eta_ab[n,2:])/(2*dx)
+    S_ac[1:-1]      = (eta_ac[n,:-2]-eta_ac[n,2:])/(2*dx)
     S_ab[0]         = (eta_ab[n,0]- eta_ab[n,1])/dx
     S_ab[-1]        = (eta_ab[n,-2]-eta_ab[n,-1])/dx
-    S_ac[1:-1]      = ((eta_ac[n,:-2]-eta_ac[n,1:-1])/dx+(eta_ac[n,1:-1]-eta_ac[n,2:])/dx)/2
     S_ac[0]         = (eta_ac[n,0]- eta_ac[n,1])/dx
     S_ac[-1]        = (eta_ac[n,-2]-eta_ac[n,-1])/dx
     eta_ab_i[:-1]   = eta_ab[n,:]+S_ab[:]*dx/2
@@ -134,22 +144,29 @@ for n in range(0, maxIter):
     eta_ac_i[-1]    = eta_ac[n,-1]-S_ac[-1]*dx/2
     deltaEta[n,:]   = (eta_ab_i[:]-eta_ac_i[:])/D0
 
-    # Downstream BC: H(t)=H0
-    Q_ab[-1] = opt.fsolve(fSysLocalUnsteady, Q_ab[-1], (eta_ab_i[-1], eta_ac_i[-1], S_ab[-1],
-         S_ac[-1], W_ab, W_ac, Q0, g, d50, D0, RF, ks0, C0, eps_c), xtol=tol)[0]
-    Q_ac[-1] = Q0-Q_ab[-1]
-    D_ab[-1] = uniFlowD(RF, Q_ab[-1], W_ab, S_ab[-1], d50, g, ks0, C0, eps_c, D0)
-    D_ac[-1] = uniFlowD(RF, Q_ac[-1], W_ac, S_ac[-1], d50, g, ks0, C0, eps_c, D0)
+    #? Downstream BC: imposed deltaQ + H=cost
+    Q_ab[-1] = Q0/2*(1+deltaQ_ds)
+    Q_ac[-1] = Q0/2*(1-deltaQ_ds)
+    D_ab[-1] = H0-eta_ab[n,-1]
+    D_ac[-1] = H0-eta_ac[n,-1]
     D_a[-1]  = (D_ab[-1]+D_ac[-1])/2
 
     # Solve the governing system to compute the unknowns D_ab[i], D_ac[i], Q_ab[i], Q_ac[i] and Qy[i]
     for i in range(nc-1, -1, -1):
-        Q_y[i], D_a[i]  = QyDaUpdate(D0, Q0, D_ab[i+1], D_ac[i+1], Q_ab[i+1], Q_ac[i+1], S_ab[i], S_ac[i], 
+        Q_y[i], deltaDa  = QyDaUpdate(D0, Q0, D_ab[i+1], D_ac[i+1], Q_ab[i+1], Q_ac[i+1], S_ab[i], S_ac[i], 
             deltaEta[n,i], deltaEta[n,i+1], W_ab, W_ac, g, d50, dx, ks0, C0, RF, eps_c)
-        D_ab[i] = D_a[i]-deltaEta[n,i]*D0/2
-        D_ac[i] = D_a[i]+deltaEta[n,i]*D0/2
-        Q_ab[i] = Q_ab[i+1]-Q_y[i]
-        Q_ac[i] = Q_ac[i+1]+Q_y[i]
+        for k in range(nIterQy):
+            D_a[i]  = D_a[i+1]+deltaDa
+            D_ab[i] = D_a[i]-deltaEta[n,i]*D0/2
+            D_ac[i] = D_a[i]+deltaEta[n,i]*D0/2
+            Q_ab[i] = Q_ab[i+1]-Q_y[i]
+            Q_ac[i] = Q_ac[i+1]+Q_y[i]
+            D_ab_k  = (D_ab[i]+D_ab[i+1])/2
+            D_ac_k  = (D_ac[i]+D_ac[i+1])/2
+            Q_ab_k  = (Q_ab[i]+Q_ab[i+1])/2
+            Q_ac_k  = (Q_ac[i]+Q_ac[i+1])/2
+            Q_y[i], deltaDa  = QyDaUpdate(D0, Q0, D_ab_k, D_ac_k, Q_ab_k, Q_ac_k, S_ab[i], S_ac[i], 
+                deltaEta[n,i], deltaEta[n,i+1], W_ab, W_ac, g, d50, dx, ks0, C0, RF, eps_c)
 
     # Shields parameter update
     Theta_ab = shieldsUpdate(RF, Q_ab, W_ab, D_ab, d50, g, delta, ks0, C0, eps_c)
@@ -238,10 +255,15 @@ myPlot(nFig,xi,D_a,'Mean water depth','Cross-section-averaged water depth along 
 Qa_plot = np.vstack([Q_ac, Q_ab])
 nFig += 1
 plt.figure(nFig)
-plt.imshow(Qa_plot, cmap='Purples', vmin=Q0/4, vmax=2/3*Q0, aspect='auto')
+plt.imshow(Qa_plot, cmap='GnBu', vmin=Q0/4, vmax=2/3*Q0, aspect='auto')
 plt.xticks(range(0,nc,int(nc/10)), range(0,nc,int(nc/10)))
 plt.yticks(range(2), ['ac', 'ab'])
 plt.title('Water discharge [m^3/s]')
 plt.colorbar()
+
+
+nFig += 1
+myPlot(nFig,xc,Q_y,'Qy','Qy','x [m]','D_a [m]')
+
 
 plt.show()
