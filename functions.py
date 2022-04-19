@@ -6,19 +6,10 @@ import numpy as np
 import math
 
 
-def uniFlowQ(rf, w, s, d, d50, g, ks, c, eps_c):
+def uniFlowQ(rf, w, s, d, d50, g, c, eps_c):
     # Uniform flow discharge computation
-    if rf == 'ks':
-        if ks == 0:
-            ks = 21.1 / (d50 ** (1 / 6))  # Gauckler & Strickler formula
-        return w * ks * s ** 0.5 * d ** (5 / 3)
-    elif rf == 'C':
-        if c == 0:
-            c = 6 + 2.5 * np.log(d / (eps_c * d50))
-        return w * c * (g * s) ** 0.5 * d ** 1.5
-    else:
-        print('Input error: accepted values for RF are "C" and "ks".')
-        return -1
+    c = (6+2.5*np.log(d/(eps_c*d50)))*rf+c*(1-rf)
+    return w*c*(g*s)**0.5*d**1.5
 
 
 def chezySys(d, q, w, s, d50, g, eps_c):
@@ -27,38 +18,24 @@ def chezySys(d, q, w, s, d50, g, eps_c):
     return q / (w * (6 + 2.5 * np.log(d / (eps_c * d50))) * np.sqrt(g * s) * d ** 1.5) - 1
 
 
-def uniFlowD(rf, q, w, s, d50, g, ks, c, eps_c, d0):
+def uniFlowD(rf, q, w, s, d50, g, c, eps_c, d0):
     # Uniform/gradually varying flow water depth computation
-    if rf == 'ks':
-        return (q / (w * ks * np.sqrt(s))) ** (3 / 5)
-    elif rf == 'C':
-        if c == 0:
-            return opt.fsolve(chezySys, np.array([d0]), (q, w, s, d50, g, eps_c))[0]
-        else:
-            return (q / (w * c * np.sqrt(g * s))) ** (2 / 3)
+    if rf == 1:
+        return opt.fsolve(chezySys, np.array([d0]), (q, w, s, d50, g, eps_c))[0]
     else:
-        print('Input error: accepted values for RF are "C" and "ks".')
-        return -1
+        return (q/(w*c*np.sqrt(g*s)))**(2/3)
 
-
-def uniFlowS(rf, q, w, d, d50, g, ks, c, eps_c):
+def uniFlowS(rf, q, w, d, d50, g, c, eps_c):
     # Uniform/gradually varying flow bed/energy slope computation (wide rectangular cross-section hypothesis is made)
-    if rf == 'ks':
-        return (q/(w*ks*d**(5/3)))**2
-    elif rf == 'C':
-        if c == 0:
-            c = 6+2.5*np.log(d/(eps_c*d50))
-        return (q/(w*c*g**0.5*d**1.5))**2
-    else:
-        print('Input error: accepted values for RF are "C" and "ks".')
-        return -1
+    c = (6+2.5*np.log(d/(eps_c*d50)))*rf+c*(1-rf)
+    return (q/(w*c*g**0.5*d**1.5))**2
+    
 
-
-def fSys(q_b, rf, ddb, ddc, d0, inStep, qu, w_b, w_c, s_b, s_c, d50, dx, g, ks, c, eps_c):
+def fSys(q_b, rf, ddb, ddc, d0, inStep, qu, w_b, w_c, s_b, s_c, d50, dx, g, c, eps_c):
     # fSys = 0 is solved to solve the flow partition problem at the node for each time step
     q_c = qu - q_b
-    d_b = buildProfile(rf, ddb, q_b, w_b, s_b, d50, dx, g, ks, c, eps_c)
-    d_c = buildProfile(rf, ddc, q_c, w_c, s_c, d50, dx, g, ks, c, eps_c)
+    d_b = buildProfile(rf, ddb, q_b, w_b, s_b, d50, dx, g, c, eps_c)
+    d_c = buildProfile(rf, ddc, q_c, w_c, s_c, d50, dx, g, c, eps_c)
     # return (d_b[0] - d_c[0]) / d0 + inStep  # equal wse at branch inlets
     return (d_b[0] - d_c[0] + inStep * d0) / ((d_b[0] + d_c[0]) / 2)
 
@@ -133,37 +110,37 @@ def landau(time_landau, rq_0, k2, omega):
     return (-k2 / omega + (rq_0 ** (-2) + k2 / omega) * np.exp((-2 * omega) * time_landau)) ** (-0.5)
 
 
-def buildProfile(rf, dd, q, w, s, d50, dx, g, ks, c, eps_c):
+def buildProfile(rf, dd, q, w, s, d50, dx, g, c, eps_c):
     d = np.zeros(len(s)+1)
     d[-1] = dd
     for i in range(len(s), 0, -1):
-        j = uniFlowS(rf, q, w, d[i], d50, g, ks, c, eps_c)
+        j = uniFlowS(rf, q, w, d[i], d50, g, c, eps_c)
         Fr = q / (w * d[i] * np.sqrt(g * d[i]))
         if Fr > 1:
             print("Warning: supercritical flow")
         d[i-1] = d[i]-dx*(s[i-1]-j)/(1-Fr**2)
     return d
 
-def profilesF(s, rf, q, w, d, d50, g, ks, c, eps_c):
-    j = uniFlowS(rf, q, w, d, d50, g, ks, c, eps_c)
+def profilesF(s, rf, q, w, d, d50, g, c, eps_c):
+    j = uniFlowS(rf, q, w, d, d50, g, c, eps_c)
     Fr = q/(w*d*np.sqrt(g*d))
     return (s-j)/(1-Fr**2)
 
 
-def buildProfile_rk4(rf, dd, q, w, s, d50, dx, g, ks, c, eps_c):
+def buildProfile_rk4(rf, dd, q, w, s, d50, dx, g, c, eps_c):
     d = np.zeros(len(s)+1)
     d[-1] = dd
     for i in range(len(s), 0, -1):
-        k1 = profilesF(s[i-1], rf, q, w, d[i], d50, g, ks, c, eps_c)
-        k2 = profilesF(s[i-1], rf, q, w, d[i]-dx/2*k1, d50, g, ks, c, eps_c)
-        k3 = profilesF(s[i-1], rf, q, w, d[i]-dx/2*k2, d50, g, ks, c, eps_c)
-        k4 = profilesF(s[i-1], rf, q, w, d[i]-dx*k3, d50, g, ks, c, eps_c)
+        k1 = profilesF(s[i-1], rf, q, w, d[i], d50, g, c, eps_c)
+        k2 = profilesF(s[i-1], rf, q, w, d[i]-dx/2*k1, d50, g, c, eps_c)
+        k3 = profilesF(s[i-1], rf, q, w, d[i]-dx/2*k2, d50, g, c, eps_c)
+        k4 = profilesF(s[i-1], rf, q, w, d[i]-dx*k3, d50, g, c, eps_c)
         d[i-1] = d[i]-dx/6*(k1+2*k2+2*k3+k4)
     return d
 
 
-def shieldsUpdate(rf, q, w, d, d50, g, delta, ks, c, eps_c):
-    j = uniFlowS(rf, q, w, d, d50, g, ks, c, eps_c)
+def shieldsUpdate(rf, q, w, d, d50, g, delta, c, eps_c):
+    j = uniFlowS(rf, q, w, d, d50, g, c, eps_c)
     theta = j * d / (delta * d50)
     return theta
 
@@ -176,7 +153,7 @@ def expLab(time_exp, deltaQ_0, deltaQ_eq, omega):
     return (deltaQ_0 - deltaQ_eq) * np.exp(- omega * (time_exp - time_exp[0])) + deltaQ_eq
 
 
-def fSys_BRT(x, dsBC, rf, tf, theta0, Q0, Qs0, w, l, d0, s0, w_b, w_c, d50, alpha, r, g, delta, ks, c, eps_c):
+def fSys_BRT(x, dsBC, rf, tf, theta0, Q0, Qs0, w, l, d0, s0, w_b, w_c, d50, alpha, r, g, delta, c, eps_c):
     # returns the residuals of the system of equation given by liquid and solid mass balance applied to the node and
     # one cell
     q0 = Q0 / w
@@ -190,8 +167,8 @@ def fSys_BRT(x, dsBC, rf, tf, theta0, Q0, Qs0, w, l, d0, s0, w_b, w_c, d50, alph
         phi_c = phis(np.array([theta_c]), tf, d0, d50)[0]
         qs_b = np.sqrt(g * delta * d50 ** 3) * phi_b
         qs_c = np.sqrt(g * delta * d50 ** 3) * phi_c
-        q_b = uniFlowQ(rf, w_b, x[2] * s0, x[0], d50, g, ks, c, eps_c) / w_b
-        q_c = uniFlowQ(rf, w_c, x[2] * s0, x[1], d50, g, ks, c, eps_c) / w_c
+        q_b = uniFlowQ(rf, w_b, x[2] * s0, x[0], d50, g, c, eps_c) / w_b
+        q_c = uniFlowQ(rf, w_c, x[2] * s0, x[1], d50, g, c, eps_c) / w_c
         qs_y = (qs_b - qs_c) / (2 * alpha) * w_b / w
         q_y = (q_b - q_c) / (2 * alpha) * w_b / w
         res[0] = qs_y / qs0 - q_y / q0 + 2 * r * (x[1] - x[0]) / (theta0 ** 0.5 * (0.5 * (w + w_b + w_c)))
@@ -209,8 +186,8 @@ def fSys_BRT(x, dsBC, rf, tf, theta0, Q0, Qs0, w, l, d0, s0, w_b, w_c, d50, alph
         phi_c = phis(np.array([theta_c]), tf, d0, d50)[0]
         qs_b = np.sqrt(g * delta * d50 ** 3) * phi_b
         qs_c = np.sqrt(g * delta * d50 ** 3) * phi_c
-        q_b = uniFlowQ(rf, w_b, x[2] * s0, x[0], d50, g, ks, c, eps_c) / w_b
-        q_c = uniFlowQ(rf, w_c, x[3] * s0, x[1], d50, g, ks, c, eps_c) / w_c
+        q_b = uniFlowQ(rf, w_b, x[2] * s0, x[0], d50, g, c, eps_c) / w_b
+        q_c = uniFlowQ(rf, w_c, x[3] * s0, x[1], d50, g, c, eps_c) / w_c
         qs_y = (qs_b - qs_c) / (2 * alpha) * w_b / w
         q_y = (q_b - q_c) / (2 * alpha) * w_b / w
         res[0] = qs_y / qs0 - q_y / q0 + 2 * r * (x[1] - x[0]) / (theta0 ** 0.5 * (0.5 * (w + w_b + w_c)))
@@ -220,27 +197,27 @@ def fSys_BRT(x, dsBC, rf, tf, theta0, Q0, Qs0, w, l, d0, s0, w_b, w_c, d50, alph
         return res
 
 
-def deltaQ_BRT(ic, dsBC, rf, tf, theta_u, Qu, Qsu, w, l, d0, s0, w_b, w_c, d50, alpha, r, g, delta, tol, ks, c, eps_c):
+def deltaQ_BRT(ic, dsBC, rf, tf, theta_u, Qu, Qsu, w, l, d0, s0, w_b, w_c, d50, alpha, r, g, delta, tol, c, eps_c):
     # Computes the equilibrium solution of a bifurcation, given geometry and boundary conditions, by solving
     # numerically the nonlinear system of equations described in Bolla Pittaluga et al. (2003). Returns the discharge
     # asymmetry and the branches' main hydraulic parameters.
     x = np.array([ic[0] * d0, ic[1] * d0, ic[2], ic[3]])
     if dsBC == 0:
         x = opt.fsolve(fSys_BRT, x[:3], (dsBC, rf, tf, theta_u, Qu, Qsu, w, l, d0, s0, w_b, w_c, d50, alpha, r, g, delta,
-                                     ks, c, eps_c), xtol=tol, maxfev=100000)[:3]
+                                     c, eps_c), xtol=tol, maxfev=100000)[:3]
         d_b, d_c = x[:2]
         s_b = x[2] * s0
         s_c = s_b
     elif dsBC == 1:
         x = opt.fsolve(fSys_BRT, x, (dsBC, rf, tf, theta_u, Qu, Qsu, w, l, d0, s0, w_b, w_c, d50, alpha, r, g, delta,
-                                     ks, c, eps_c), xtol=tol, maxfev=100000)[:4]
+                                     c, eps_c), xtol=tol, maxfev=100000)[:4]
         d_b, d_c = x[:2]
         s_b = x[2] * s0
         s_c = x[3] * s0
     else:
         d_b, d_c, s_b, s_c = [None, None, None, None]
-    q_b = uniFlowQ(rf, w_b, s_b, d_b, d50, g, ks, c, eps_c)
-    q_c = uniFlowQ(rf, w_c, s_c, d_c, d50, g, ks, c, eps_c)
+    q_b = uniFlowQ(rf, w_b, s_b, d_b, d50, g, c, eps_c)
+    q_c = uniFlowQ(rf, w_c, s_c, d_c, d50, g, c, eps_c)
     theta_b = s_b * x[0] / (delta * d50)
     theta_c = s_c * x[1] / (delta * d50)
     fr_b = q_b / (w_b * x[0] * np.sqrt(g * x[0]))
@@ -248,7 +225,7 @@ def deltaQ_BRT(ic, dsBC, rf, tf, theta_u, Qu, Qsu, w, l, d0, s0, w_b, w_c, d50, 
     return (q_b - q_c) / Qu, theta_b, theta_c, fr_b, fr_c, s_b, s_c, d_b, d_c
 
 
-def betaC_BRT(nb, beta_max, dsBC, rf, tf, theta0, ds0, w_b, w_c, Ls, d50, alpha, r, g, delta, ks, c, eps_c):
+def betaC_BRT(nb, beta_max, dsBC, rf, tf, theta0, ds0, w_b, w_c, Ls, d50, alpha, r, g, delta, c, eps_c):
     # Hydraulic parameters
     d0 = d50 / ds0
     s0 = theta0 * delta * d50 / d0
@@ -269,12 +246,12 @@ def betaC_BRT(nb, beta_max, dsBC, rf, tf, theta0, ds0, w_b, w_c, Ls, d50, alpha,
     for i in range(nb - 1, -1, -1):
         # Derived flow conditions for the main channel
         w = 2 * beta0[i] * d0
-        Q0 = uniFlowQ(rf, w, s0, d0, d50, g, ks, c, eps_c)
+        Q0 = uniFlowQ(rf, w, s0, d0, d50, g, c, eps_c)
         Qs0 = w * qs0
 
         # BRT equilibrium solution
         BRT_out = deltaQ_BRT((x[0] / d0, x[1] / d0, x[2] / s0), dsBC, rf, tf, theta0, Q0, Qs0, w, Ls * d0, d0, s0, w_b,
-                             w_c, d50, alpha, r, g, delta, tol, ks, c, eps_c)
+                             w_c, d50, alpha, r, g, delta, tol, c, eps_c)
         rq[i] = BRT_out[0]
         x = np.array([[BRT_out[6]], [BRT_out[7]], [BRT_out[5]]])
 
@@ -336,12 +313,12 @@ def interpolate(func, xData, yData, ic=None, bounds=(-np.inf, np.inf)):
     return par, intCurve, covar
 
 
-def fSysLocalUnsteady(q_b, eta_b, eta_c, s_b, s_c, w_b, w_c, q_u, g, d50, d0, rf, ks0, c0, eps_c):
+def fSysLocalUnsteady(q_b, eta_b, eta_c, s_b, s_c, w_b, w_c, q_u, g, d50, d0, rf, c0, eps_c):
     # Returns the residual of the system of equations composed by continuity (q_b+q_c=q_u), uniform
     # flow stage-discharge relationships and dH/dy=0
     q_c = q_u-q_b
-    d_b = uniFlowD(rf, q_b, w_b, s_b, d50, g, ks0, c0, eps_c, d0)
-    d_c = uniFlowD(rf, q_c, w_c, s_c, d50, g, ks0, c0, eps_c, d0)
+    d_b = uniFlowD(rf, q_b, w_b, s_b, d50, g, c0, eps_c, d0)
+    d_c = uniFlowD(rf, q_c, w_c, s_c, d50, g, c0, eps_c, d0)
     return ((d_b+eta_b)-(d_c+eta_c))/((d_b+d_c)/2)
 
 
@@ -350,7 +327,7 @@ def eqSin(t, a, f, t0, b):
     Used to interpolate the statistically stationary stage of deltaQ vs time, in order to find the amplitude and
     frequency of its oscillations
     """
-    return a * np.sin(2 * f * np.pi * (t - t0)) + b
+    return a*np.sin(2*f*np.pi*(t-t0))+b
 
 
 def mkdir_p(mypath):
@@ -367,44 +344,44 @@ def mkdir_p(mypath):
         else:
             raise
 
-def fSysSC(x, D0, Q0, D_abV, D_acV, Q_abV, Q_acV, S_ab, S_ac, w_ab, w_ac, eta_ab, eta_ac, g, d50, dx, ks0, c0, rf):
+def fSysSC(x, D0, Q0, D_abV, D_acV, Q_abV, Q_acV, S_ab, S_ac, W_ab, W_ac, eta_ab, eta_ac, g, d50, dx, c0, rf):
     # Function to be used to iteratively solve the system governing water partitioning along the semichannels.
     # The unknown array x is equal to x=[D_ab[i]/D0, D_ac[i]/D0, Q_ab[i]/Q0, Q_ac[i]/Q0, Qy[i]/Q0]
     # Change in notation: i -> M, i+1 -> V
     res=np.ones((5))
     D_abM, D_acM, Q_abM, Q_acM, Q_y = (x[0]*D0, x[1]*D0, x[2]*Q0, x[3]*Q0, x[4]*Q0)
-    j_ab  = uniFlowS(rf, Q_abV, w_ab, D_abV, d50, g, ks0, c0, 2.5)
-    j_ac  = uniFlowS(rf, Q_acV, w_ac, D_acV, d50, g, ks0, c0, 2.5)
-    Fr_ab = Q_abV/(w_ab*D_abV)/sqrt(g*D_abV)    
-    Fr_ac = Q_acV/(w_ac*D_acV)/sqrt(g*D_acV)
-    res[0] = (D_abV-D_abM)/dx*(1-Fr_ab**2)/(S_ab-j_ab-Q_y/dx*Q_abV/(g*w_ab**2*D_abV**2))-1
-    res[1] = (D_acV-D_acM)/dx*(1-Fr_ac**2)/(S_ac-j_ac+Q_y/dx*Q_acV/(g*w_ac**2*D_acV**2))-1
+    j_ab  = uniFlowS(rf, Q_abV, W_ab, D_abV, d50, g, c0, 2.5)
+    j_ac  = uniFlowS(rf, Q_acV, W_ac, D_acV, d50, g, c0, 2.5)
+    Fr_ab = Q_abV/(W_ab*D_abV)/sqrt(g*D_abV)    
+    Fr_ac = Q_acV/(W_ac*D_acV)/sqrt(g*D_acV)
+    res[0] = (D_abV-D_abM)/dx*(1-Fr_ab**2)/(S_ab-j_ab-Q_y/dx*Q_abV/(g*W_ab**2*D_abV**2))-1
+    res[1] = (D_acV-D_acM)/dx*(1-Fr_ac**2)/(S_ac-j_ac+Q_y/dx*Q_acV/(g*W_ac**2*D_acV**2))-1
     res[2] = (Q_abM+Q_y)/Q_abV-1
     res[3] = (Q_acM-Q_y)/Q_acV-1
     res[4] = (D_abM+eta_ab)/(D_acM+eta_ac)-1
     return res
 
-def coeffSysSC(D_abV, D_acV, Q_abV, Q_acV, S_ab, S_ac, w_ab, w_ac, eta_ab, eta_ac, g, d50, dx, ks0, c0, rf):
+def coeffSysSC(D_abV, D_acV, Q_abV, Q_acV, S_ab, S_ac, W_ab, W_ac, eta_ab, eta_ac, g, d50, dx, c0, rf):
     # Computes the coefficient matrix A and the array B for the semichannels system to compute
     # the unknowns x=[D_ab[i]/D0, D_ac[i]/D0, Q_ab[i]/Q0, Q_ac[i]/Q0, Qy[i]/Q0], that is linear
     # as long as the equations discretization is explicits
-    j_ab  = uniFlowS(rf, Q_abV, w_ab, D_abV, d50, g, ks0, c0, 2.5)
-    j_ac  = uniFlowS(rf, Q_acV, w_ac, D_acV, d50, g, ks0, c0, 2.5)
-    Fr_ab = Q_abV/(w_ab*D_abV)/sqrt(g*D_abV)    
-    Fr_ac = Q_acV/(w_ac*D_acV)/sqrt(g*D_acV)
-    A = np.array([[Q_abV/(dx*g*w_ab**2*D_abV**2*(1-Fr_ab**2)),-1/dx, 0, 0, 0],
-                  [-Q_acV/(dx*g*w_ac**2*D_acV**2*(1-Fr_ac**2)),0,-1/dx, 0, 0],
+    j_ab  = uniFlowS(rf, Q_abV, W_ab, D_abV, d50, g, c0, 2.5)
+    j_ac  = uniFlowS(rf, Q_acV, W_ac, D_acV, d50, g, c0, 2.5)
+    Fr_ab = Q_abV/(W_ab*D_abV)/sqrt(g*D_abV)    
+    Fr_ac = Q_acV/(W_ac*D_acV)/sqrt(g*D_acV)
+    A = np.array([[Q_abV/(dx*g*W_ab**2*D_abV**2*(1-Fr_ab**2)),-1/dx, 0, 0, 0],
+                  [-Q_acV/(dx*g*W_ac**2*D_acV**2*(1-Fr_ac**2)),0,-1/dx, 0, 0],
                   [1,0,0,1,0],
                   [-1,0,0,0,1],
                   [0,1,-1,0,0]])
     B = np.array([-D_abV/dx+(S_ab-j_ab)/(1-Fr_ab**2), -D_acV/dx+(S_ac-j_ac)/(1-Fr_ac**2), Q_abV, Q_acV, -eta_ab+eta_ac])
     return A, B
 
-def QyDaUpdate(D0, Q0, D_ab, D_ac, Q_ab, Q_ac, S_ab, S_ac, deltaEtaM, deltaEtaV, w_ab, w_ac, g, d50, dx, ks0, c0, rf, eps_c):
-    Omega_abV = w_ab*D_ab
-    Omega_acV = w_ac*D_ac
-    j_ab     = uniFlowS(rf, Q_ab, w_ab, D_ab, d50, g, ks0, c0, eps_c)
-    j_ac     = uniFlowS(rf, Q_ac, w_ac, D_ac, d50, g, ks0, c0, eps_c)
+def QyDaUpdate(D0, Q0, D_ab, D_ac, Q_ab, Q_ac, S_ab, S_ac, deltaEtaM, deltaEtaV, W_ab, W_ac, g, d50, dx, c0, rf, eps_c):
+    Omega_abV = W_ab*D_ab
+    Omega_acV = W_ac*D_ac
+    j_ab     = uniFlowS(rf, Q_ab, W_ab, D_ab, d50, g, c0, eps_c)
+    j_ac     = uniFlowS(rf, Q_ac, W_ac, D_ac, d50, g, c0, eps_c)
     Fr_ab    = Q_ab/(Omega_abV*np.sqrt(g*D_ab))
     Fr_ac    = Q_ac/(Omega_acV*np.sqrt(g*D_ac))
     deltaJ    = -j_ab/(1-Fr_ab**2)+j_ac/(1-Fr_ac**2)
@@ -417,6 +394,32 @@ def QyDaUpdate(D0, Q0, D_ab, D_ac, Q_ab, Q_ac, S_ab, S_ac, deltaEtaM, deltaEtaV,
     q_y       = Q0*((a-b)*dx/D0+c)/((d+e)*Q0/D0)
     deltaDa   = -(a+b)*dx/2+q_y/2*(d-e)
     return q_y, deltaDa
+
+def QyExpl(D_ab, D_ac, Q_ab, Q_ac, S_ab, S_ac, W_ab, W_ac, g, d50, dx, c0, rf, eps_c):
+    j_ab   = uniFlowS(rf, Q_ab, W_ab, D_ab, d50, g, c0, eps_c)
+    j_ac   = uniFlowS(rf, Q_ac, W_ac, D_ac, d50, g, c0, eps_c)
+    Fr_ab  = Q_ab/(W_ab*D_ab*np.sqrt(g*D_ab))
+    Fr_ac  = Q_ac/(W_ac*D_ac*np.sqrt(g*D_ac))
+    deltaJ = -j_ab/(1-Fr_ab**2)+j_ac/(1-Fr_ac**2)
+    deltaS = S_ab*Fr_ab**2/(1-Fr_ab**2)-S_ac*Fr_ac**2/(1-Fr_ac**2)
+    a1     = (S_ab*Fr_ab**2-j_ab)/(1-Fr_ab**2)
+    a2     = (S_ac*Fr_ac**2-j_ac)/(1-Fr_ac**2)
+    b1     = 1/(1-Fr_ab**2)*Q_ab/(g*W_ab**2*D_ab**2)
+    b2     = 1/(1-Fr_ac**2)*Q_ac/(g*W_ac**2*D_ac**2)
+    q_y    = (a1-a2)/(b1+b2)
+    return q_y*dx
+
+def dDadxExpl(q_y, D_ab, D_ac, Q_ab, Q_ac, S_ab, S_ac, W_ab, W_ac, g, d50, c0, rf, eps_c):
+    j_ab  = uniFlowS(rf, Q_ab, W_ab, D_ab, d50, g, c0, eps_c)
+    j_ac  = uniFlowS(rf, Q_ac, W_ac, D_ac, d50, g, c0, eps_c)
+    Fr_ab = Q_ab/(W_ab*D_ab*np.sqrt(g*D_ab))
+    Fr_ac = Q_ac/(W_ac*D_ac*np.sqrt(g*D_ac))
+    a1    = (S_ab-j_ab)/(1-Fr_ab**2)
+    a2    = (S_ac-j_ac)/(1-Fr_ac**2)
+    b1    = 1/(1-Fr_ab**2)*Q_ab/(g*W_ab**2*D_ab**2)
+    b2    = 1/(1-Fr_ac**2)*Q_ac/(g*W_ac**2*D_ac**2)
+    dDadx = 0.5*(a1+a2)-0.5*q_y*(b1-b2)
+    return dDadx
 
 def minmod(slope1,slope2):
     omega    = abs(slope1)<abs(slope2)
