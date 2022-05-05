@@ -6,28 +6,27 @@ from functions import *
 
 # Model main settings
 st          = 1  # Solid transport switch: 0=fixed bed; 1=movable bed
-H0coeff     = 0.1  # =(Hd-H0)/D0, where H0 is the wse associated to D0 and Hd is the imposed downstream BC
-numPlots    = 30
+Hcoeff      = 0  # =(Hd-H0)/D0, where H0 is the wse associated to D0 and Hd is the imposed downstream BC
+D_b_eq      = 0
+numPlots    = 20
 slopeMethod = 'central'  # available options: 'central', 'downstream', 'minmod'
 
 # Numerical parameters
-dt      = 50 # timestep [s]
-dx      = 50  # cell length [m]
-tend    = 2
-maxIter = 120000*st+1 # max number of iterations during time evolution
-tol     = 1e-6 # Newton method tolerance
+dt      = 20 # timestep [s]
+dx      = 10  # cell length [m]
+tend    = 3
+maxIter = int(1e6)*st+1 # max number of iterations during time evolution
+tol     = 1e-10 # Newton method tolerance
 
 # Hydraulic parameters
-RF     = 'ks' # flow resistance formula. Available options: 'ks' (Gauckler&Strickler), 'C' (Chézy)
-ks0    = 30 # if =0, it is computed using Gauckler&Strickler formula; otherwise it's considered a constant
-C0     = 0 # if =0, it is computed using a logarithmic formula; otherwise it's considered a constant
+RF     = 0 # flow resistance formula. Available options: 'ks' (Gauckler&Strickler), 'C' (Chézy)
+C0     = 10 # if =0, it is computed using a logarithmic formula; otherwise it's considered a constant
 eps_c  = 2.5 # Chézy logarithmic formula coefficient
 TF     = 'P90' # sediment transport formula. Available options: 'P78' (Parker78), 'MPM', 'P90' (Parker90), 'EH' (Engelund&Hansen)
-Ls     = 900 # =L/D0, L=branches' dimensional length
-beta0  = 15
-theta0 = 0.07
+Ls     = 1000 # =L/D0, L=branches' dimensional length
+beta0  = 22
+theta0 = 0.1
 ds0    = 0.01 # =d50/D0
-rW     = 0.5 # =Wb/W_a, where Wb=Wc and W_a=upstream channel width
 d50    = 0.01 # median sediment diameter [m]
 p      = 0.6 # bed porosity
 r      = 0.5 # Ikeda parameter
@@ -41,13 +40,11 @@ g     = 9.81
 # ----------------------------------
 
 # Main channel IC
-if ks0 == 0:
-    ks0 = 21.1/(d50**(1/6))
 S0    = theta0*delta*ds0
 D0    = d50/ds0
 W_a   = beta0*2*D0
 phi00, phiD0, phiT0 = phis(np.array([theta0]), TF, D0, d50)
-Q0    = uniFlowQ(RF, W_a, S0, D0, d50, g, ks0, C0, eps_c)
+Q0    = uniFlowQ(RF, W_a, S0, D0, d50, g, C0, eps_c)
 Qs0   = W_a*np.sqrt(g*delta*d50 ** 3)*phi00
 Fr0   = Q0/(W_a*D0*np.sqrt(g*D0))
 nc    = int(Ls*D0/dx)
@@ -58,7 +55,6 @@ Tf = (1-p)*W_a*D0/(Qs0/W_a)
 # Arrays initialization
 nIter    = math.ceil(tend*Tf/dt)+1
 eta_a    = np.zeros((nIter,nc))
-eta_a_ic = np.zeros(nc)
 S_a      = np.zeros((nIter,nc))
 S_a_temp = np.zeros(nc+1)
 eta_a_i = np.zeros(nc+1)
@@ -73,15 +69,16 @@ t:list = [0]
 
 # IC
 eta_a[0,:]  = np.linspace(0,-S0*dx*(nc-1),num=len(eta_a[0,:]))
-eta_a_ic[:] = eta_a[0,:]
 
-# Downstream BC
-H0 = (eta_a[0,-1]-S0*dx/2+D0)+D0*H0coeff
+#? Downstream BC: H(t)=H0
+if Hcoeff != 0 or D_b_eq == 0:
+    D_b_eq = D0
+H0 = eta_a[0,-1]+D_b_eq+D0*Hcoeff
 
 for n in range(0, maxIter):
     # Channel cells slope update
     if slopeMethod == 'central':
-        S_a[n,1:-1] = ((eta_a[n,:-2]-eta_a[n,1:-1])/dx+(eta_a[n,1:-1]-eta_a[n,2:])/dx)/2
+        S_a[n,1:-1] = (eta_a[n,:-2]-eta_a[n,2:])/(2*dx)
         S_a[n,0]    = (eta_a[n,0]-eta_a[n,1])/dx
         S_a[n,-1]   = (eta_a[n,-2]-eta_a[n,-1])/dx
     elif slopeMethod == 'downstream':
@@ -99,22 +96,14 @@ for n in range(0, maxIter):
         S_a[n,1:-1] = -MCslope((eta_a[n,1:-1]-eta_a[n,:-2])/dx,(eta_a[n,2:]-eta_a[n,1:-1])/dx)
         S_a[n,0]    = (eta_a[n,0]-eta_a[n,1])/dx
         S_a[n,-1]   = (eta_a[n,-2]-eta_a[n,-1])/dx
-    elif slopeMethod == 'chiara':
-        S_a_temp[1:-1] = (eta_a[n,:-1]-eta_a[n,1:])/dx
-        eta_a_i[1:-1]  = eta_a[n,:-1]-S_a_temp[1:-1]*dx/2
-        S_a[n,1:-1]    = (eta_a_i[1:-2]-eta_a_i[2:-1])/dx
-        S_a[n,0] = S_a[n,1]
-        S_a[n,-1] = S_a[n,-2]
-        if np.any(S_a_temp<0):
-            print('errore')
 
     # Downstream BC: H(t)=H0
-    D_a[-1] = H0-eta_a[n,-1]+S_a[n,-1]*dx/2
+    D_a[-1] = H0-eta_a[n,-1]
 
     # Wse profile and Shields parameter update
-    D_a     = buildProfile(RF, D_a[-1], Q0, W_a, S_a[n,:], d50, dx, g, ks0, C0, eps_c)
-    # D_a     = buildProfile_rk4(RF, D_a[-1], Q0, W_a, S_a[n,:], d50, dx, g, ks0, C0, eps_c)
-    Theta_a = shieldsUpdate(RF, Q0, W_a, D_a, d50, g, delta, ks0, C0, eps_c)
+    D_a     = buildProfile(RF, D_a[-1], Q0, W_a, S_a[n,:], d50, dx, g, C0, eps_c)
+    # D_a     = buildProfile_rk4(RF, D_a[-1], Q0, W_a, S_a[n,:], d50, dx, g, C0, eps_c)
+    Theta_a = shieldsUpdate(RF, Q0, W_a, D_a, d50, g, delta, C0, eps_c)
     
     # Solid discharge computation + exner
     Qs_a         = W_a*np.sqrt(g*delta*d50**3)*phis(Theta_a, TF, D0, d50)[0]*st
@@ -152,10 +141,14 @@ if st==1:
     plt.ylabel('η - η0 [m]')
     for i in range(numPlots):
         plotTimeIndex = int(plotTimeIndexes[i])
-        myPlot(nFig, xc, eta_a[plotTimeIndex,:]-eta_a_ic[:], ('t=%3.1f Tf' % (plotTimeIndex*dt/Tf)), color=bed_colors[i])
-    
+        myPlot(nFig, xc, eta_a[plotTimeIndex,:]-eta_a[0,:], ('t=%3.1f Tf' % (plotTimeIndex*dt/Tf)), color=bed_colors[i])
+    nFig +=1
+    plt.figure(nFig)
+    plt.title('Longitudinal slope evolution in time')
+    plt.xlabel('x [m]')
+    plt.ylabel('S [-]')
     for i in range(numPlots-1):
         plotTimeIndex = int(plotTimeIndexes[i])
-        myPlot(nFig+1, xc, S_a[plotTimeIndex,:], ('t=%3.1f Tf' % (plotTimeIndex*dt/Tf)), color=bed_colors[i])
-
+        myPlot(nFig, xc, S_a[plotTimeIndex,:], ('t=%3.1f Tf' % (plotTimeIndex*dt/Tf)), color=bed_colors[i])
+    
 plt.show()
