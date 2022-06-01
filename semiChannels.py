@@ -6,11 +6,10 @@ from functions import *
 
 # Model settings
 st          = 1 # Solid transport switch: 0=fixed bed; 1=movable bed
-bedIC       = 'exp' # 'exp' adds a gradual inlet step with an exponential trend, so that deltaEta[-1]=inStep; 'flat'; 'lastCell'; 'triangular'
+bedIC       = 'shifted' # 'exp' adds a gradual inlet step with an exponential trend, so that deltaEta[-1]=inStep; 'flat'; 'lastCell'; 'triangular'
 ISlength    = 0.8 # % of channel length influenced by inlet step; used if bedIC=='triangular' or bedIC=='exp'
-inStep      = -0.2
+inStep      = -0.004
 Hcoeff      = 0 # =(Hd-H0)/D0, where H0 is the wse associated to D0 and Hd is the imposed downstream BC
-D_b_eq      = 0  # alternative way to set a Hd != H0
 
 # I/O settings
 numPlots    = 20
@@ -18,8 +17,8 @@ showPlots   = True
 saveOutputs = False
 
 # Numerical parameters
-dt        = 30 # timestep [s]
-dx        = 10 # cell length [m]
+dt        = 75 # timestep [s]
+dx        = 25 # cell length [m]
 tend      = 5
 maxIter   = int(1e6)*st+1 # max number of iterations during time evolution
 maxIterQy = 100
@@ -31,8 +30,8 @@ C0     = 0 # if =0, it's computed as a function of D0=ds0/d50 via a logarithmic 
 eps_c  = 2.5 # Chézy logarithmic formula coefficient (used only if RF=1)
 TF     = 'P90' # sediment transport formula. Available options: 'P78' (Parker78), 'MPM', 'P90' (Parker90), 'EH' (Engelund&Hansen)
 Ls     = 1000 # =L/D0, L=branches' dimensional length
-beta0  = 22
-theta0 = 0.1
+beta0  = 18
+theta0 = 0.08
 ds0    = 0.01 # =d50/D0
 d50    = 0.01 # median sediment diameter [m]
 p      = 0.6 # bed porosity
@@ -109,14 +108,15 @@ elif bedIC == 'triangular':
 elif bedIC == 'lastCell':
     eta_ab[0,-1]  += inStep/2*D0
     eta_ac[0,-1]  -= inStep/2*D0
+elif bedIC == 'shifted':
+    eta_ab[0,:] += inStep/2*D0
+    eta_ac[0,:] -= inStep/2*D0
 eta_a[0,:] = (eta_ab[0,:]+eta_ac[0,:])/2
 W_ab       = W_a/2
 W_ac       = W_a/2
 
 #? Downstream BC: H(t)=H0
-if Hcoeff != 0 or D_b_eq == 0:
-    D_b_eq = D0
-H0 = eta_a[0,-1]+D_b_eq+D0*Hcoeff
+H0 = 0.5*(eta_ab[0,-1]+eta_ac[0,-1]-S0*dx)+D0*(1+Hcoeff)
 
 # Print model parameters
 print('\nINPUT PARAMETERS:\nHcoeff = %3.2f\nSolid transport formula = %s\nnc = %d\ndx = %d m'
@@ -144,8 +144,8 @@ for n in range(0, maxIter):
     S_ab[1:-1]    = (eta_ab[n,:-2]-eta_ab[n,2:])/(2*dx)
     S_ac[1:-1]    = (eta_ac[n,:-2]-eta_ac[n,2:])/(2*dx)
     S_ab[0]       = (eta_ab[n,0]-eta_ab[n,1])/dx
-    S_ab[-1]      = (eta_ab[n,-2]-eta_ab[n,-1])/dx
     S_ac[0]       = (eta_ac[n,0]-eta_ac[n,1])/dx
+    S_ab[-1]      = (eta_ab[n,-2]-eta_ab[n,-1])/dx
     S_ac[-1]      = (eta_ac[n,-2]-eta_ac[n,-1])/dx
 
     # Upstream BC: even water discharge partitioning
@@ -153,9 +153,9 @@ for n in range(0, maxIter):
     Q_ac[0] = Q0/2
 
     # Downstream BC: D=H0-eta
-    D_ab[-1] = H0-eta_ab[n,-1]
-    D_ac[-1] = H0-eta_ac[n,-1]
-    D_a[-1]  = (D_ab[-1]+D_ac[-1])/2
+    D_a[-1]    = H0-0.5*(eta_ab[n,-1]-S_ab[-1]*dx/2+eta_ac[n,-1]-S_ac[-1]*dx/2)
+    D_ab[-1]   = D_a[-1]-0.5*((eta_ab[n,-1]-S_ab[-1]*dx/2)-(eta_ac[n,-1]-S_ac[-1]*dx/2))
+    D_ac[-1]   = D_a[-1]+0.5*((eta_ab[n,-1]-S_ab[-1]*dx/2)-(eta_ac[n,-1]-S_ac[-1]*dx/2))
 
     # Solve the governing system to compute the unknowns D_ab[i], D_ac[i], Q_ab[i], Q_ac[i] and Qy[i] iteratively in upstream direction
     for i in range(nc-1, -1, -1):
@@ -167,7 +167,7 @@ for n in range(0, maxIter):
         Q_y_MV = QyExpl(D_ab0,D_ac0,Q_ab0,Q_ac0,S_ab[i],S_ac[i],W_ab,W_ac,g,d50,dx,C0,RF,eps_c)
         Q_abV  = Q_ab0+Q_y_MV
         Q_acV  = Q_ac0-Q_y_MV
-        dDadx  = dDadxExpl(Q_y_MV/dx,D_ab[i+1],D_ac[i+1],Q_abV,Q_acV,S_ab[i],S_ac[i],W_ab,W_ac,g,d50,C0,RF,eps_c)
+        dDadx  = dDadxExpl(Q_y_MV,D_ab[i+1],D_ac[i+1],Q_abV,Q_acV,S_ab[i],S_ac[i],W_ab,W_ac,g,d50,dx,C0,RF,eps_c)
         dDabdx = dDadx+0.5*(S_ab[i]-S_ac[i])
         dDacdx = dDadx-0.5*(S_ab[i]-S_ac[i])
         D_abM  = D_ab[i+1]-dDabdx*dx
@@ -184,7 +184,7 @@ for n in range(0, maxIter):
             Q_ab_k     = 0.5*(Q_abM+Q_abV)
             Q_ac_k     = 0.5*(Q_acM+Q_acV)
             Q_y_new    = QyExpl(D_ab_k,D_ac_k,Q_ab_k,Q_ac_k,S_ab[i],S_ac[i],W_ab,W_ac,g,d50,dx,C0,RF,eps_c)
-            dDadx_new  = dDadxExpl(Q_y_new/dx,D_ab_k,D_ac_k,Q_ab_k,Q_ac_k,S_ab[i],S_ac[i],W_ab,W_ac,g,d50,C0,RF,eps_c)
+            dDadx_new  = dDadxExpl(Q_y_new,D_ab_k,D_ac_k,Q_ab_k,Q_ac_k,S_ab[i],S_ac[i],W_ab,W_ac,g,d50,dx,C0,RF,eps_c)
             dDabdx_new = dDadx_new+0.5*(S_ab[i]-S_ac[i])
             dDacdx_new = dDadx_new-0.5*(S_ab[i]-S_ac[i])
             D_abM      = D_ab[i+1]-dDabdx_new*dx
