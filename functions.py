@@ -15,7 +15,7 @@ def uniFlowQ(rf, w, s, d, d50, g, c, eps_c):
 def chezySys(d, q, w, s, d50, g, eps_c):
     # function used to solve the system of 2 equations defined by the Chézy uniform flow formula and the logarithmic
     # expression for the roughness coefficient
-    return q / (w * (6 + 2.5 * np.log(d / (eps_c * d50))) * np.sqrt(g * s) * d ** 1.5) - 1
+    return q/(w*(6+2.5*np.log(d/(eps_c*d50)))*np.sqrt(g*s)*d**1.5)-1
 
 
 def uniFlowD(rf, q, w, s, d50, g, c, eps_c, d0):
@@ -33,11 +33,51 @@ def uniFlowS(rf, q, w, d, d50, g, c, eps_c):
 
 def fSys(q_b, rf, ddb, ddc, d0, inStep, qu, w_b, w_c, s_b, s_c, d50, dx, g, c, eps_c):
     # fSys = 0 is solved to solve the flow partition problem at the node for each time step
-    q_c = qu - q_b
-    d_b = buildProfile(rf, ddb, q_b, w_b, s_b, d50, dx, g, c, eps_c)
-    d_c = buildProfile(rf, ddc, q_c, w_c, s_c, d50, dx, g, c, eps_c)
-    # return (d_b[0] - d_c[0]) / d0 + inStep  # equal wse at branch inlets
-    return (d_b[0] - d_c[0] + inStep * d0) / ((d_b[0] + d_c[0]) / 2)
+    q_c = qu-q_b
+    d_b = buildProfile(rf,ddb,q_b,w_b,s_b,d50,dx,g,c,eps_c)
+    d_c = buildProfile(rf,ddc,q_c,w_c,s_c,d50,dx,g,c,eps_c)
+    return (d_b[0]-d_c[0]+inStep*d0)/((d_b[0]+d_c[0])/2)
+
+def phis_scalar(theta, tf, d0, d50):
+    phi0 = 0
+    phiD = 0
+    phiT = 0
+    if tf == 'MPM':
+        theta_cr = 0.047
+        if theta > theta_cr:
+            phi0 = 8 * (theta - theta_cr) ** 1.5
+            phiT = 1.5 * theta / (theta - theta_cr)
+    elif tf == 'EH':
+        c = 6 + 2.5 * np.log(d0 / (2.5 * d50))
+        cD = 2.5 / c
+        phi0 = 0.05 * c ** 2 * theta ** 2.5
+        phiD = 2 * cD
+        phiT = 2.5
+    elif tf == 'P90':  # Parker (1990)
+        A = 0.0386
+        B = 0.853
+        C = 5474
+        D = 0.00218
+        x = theta / A
+        if x > 1.59:
+            phi0 = C * D * theta ** 1.5 * (1 - B / x) ** 4.5
+            Phi_der = 1.5 * theta ** 0.5 * (1 - B / x) ** 4.5 * C * D + 4.5 * A * B * (1. - B / x) ** 3.5 * C * D / (
+                        theta ** 0.5)
+        elif x >= 1:
+            phi0 = D * theta ** 1.5 * (np.exp(14.2 * (x - 1) - 9.28 * (x - 1) ** 2))
+            Phi_der = 1. / A * phi0 * (14.2 - 9.28 * 2. * (x - 1.)) + 1.5 * phi0 / theta
+        else:
+            phi0 = D * theta ** 1.5 * x ** 14.2
+            Phi_der = 14.2 / A * D * theta ** 1.5 * x ** 13.2 + D * x ** 14.2 * 1.5 * theta ** 0.5
+        phiT = theta / phi0 * Phi_der
+    elif tf == 'P78':  # Parker (1978)
+        theta_cr = 0.03
+        phi0 = 11.2 * theta ** 1.5 * (1 - theta_cr / theta) ** 4.5
+        phiT = 1.5 + 4.5 * theta_cr / (theta - theta_cr)
+    else:
+        print('error: unknown transport formula')
+        phi0 = None
+    return phi0, phiD, phiT
 
 # Computes phi and phiT given array values of theta and D
 def phis(theta, tf, d0, d50):
@@ -78,30 +118,16 @@ def phis(theta, tf, d0, d50):
     return phi, phiD, phiT
 
 
-def betaR_MR(rf, theta, ds, r, phiD, phiT, eps_c):
-    if rf == 'ks':
-        c0 = 21.1 / (9.81 ** 0.5) / ds ** (1 / 6)
-        cD = 1 / 6
-    elif rf == 'C':
-        c0 = 6 + 2.5 * np.log(1 / (eps_c * ds))
-        cD = 2.5 / c0
-    else:
-        print('Input error: accepted values for RF are "C" and "ks".')
-        c0 = -1
-        cD = -1
-    betaR = np.pi / (2 * np.sqrt(2)) * c0 * np.sqrt(r) / (theta ** 0.25 * np.sqrt(phiD + phiT - (1.5 + cD)))
+def betaR_MR(theta, ds, r, phiD, phiT, eps_c):
+    c0 = 6+2.5*np.log(1/(eps_c*ds))
+    cD = 2.5/c0
+    betaR = np.pi/(2*np.sqrt(2))*c0*np.sqrt(r)/(theta**0.25*np.sqrt(phiD+phiT-(1.5+cD)))
     return betaR
 
 
 def betaC_MR(rf, theta, ds, alpha, r, phiD, phiT, eps_c):
-    if rf == 'ks':
-        cD = 1 / 6
-    elif rf == 'C':
-        c0 = 6 + 2.5 * np.log(1 / (eps_c * ds))
-        cD = 2.5 / c0
-    else:
-        print('Input error: accepted values for RF are "C" and "ks".')
-        cD = -1
+    c0 = 6 + 2.5 * np.log(1 / (eps_c * ds))
+    cD = 2.5 / c0
     betaC = r * alpha * 4 / (theta ** 0.5) * 1 / (-(1.5 + cD) + phiT + phiD)
     return betaC
 
@@ -116,9 +142,10 @@ def buildProfile(rf, dd, q, w, s, d50, dx, g, c, eps_c):
     for i in range(len(s), 0, -1):
         j = uniFlowS(rf, q, w, d[i], d50, g, c, eps_c)
         Fr = q / (w * d[i] * np.sqrt(g * d[i]))
-        if Fr > 1:
-            print("Warning: supercritical flow")
         d[i-1] = d[i]-dx*(s[i-1]-j)/(1-Fr**2)
+    Fr = q/(w*d*np.sqrt(g*d))
+    if np.any(Fr>1):
+        print("Warning: supercritical flow")
     return d
 
 def profilesF(s, rf, q, w, d, d50, g, c, eps_c):
@@ -317,8 +344,8 @@ def fSysLocalUnsteady(q_b, eta_b, eta_c, s_b, s_c, w_b, w_c, q_u, g, d50, d0, rf
     # Returns the residual of the system of equations composed by continuity (q_b+q_c=q_u), uniform
     # flow stage-discharge relationships and dH/dy=0
     q_c = q_u-q_b
-    d_b = uniFlowD(rf, q_b, w_b, s_b, d50, g, c0, eps_c, d0)
-    d_c = uniFlowD(rf, q_c, w_c, s_c, d50, g, c0, eps_c, d0)
+    d_b = uniFlowD(rf,q_b,w_b,s_b,d50,g,c0,eps_c,d0)
+    d_c = uniFlowD(rf,q_c,w_c,s_c,d50,g,c0,eps_c,d0)
     return ((d_b+eta_b)-(d_c+eta_c))/((d_b+d_c)/2)
 
 
@@ -377,27 +404,9 @@ def coeffSysSC(D_abV, D_acV, Q_abV, Q_acV, S_ab, S_ac, W_ab, W_ac, eta_ab, eta_a
     B = np.array([-D_abV/dx+(S_ab-j_ab)/(1-Fr_ab**2), -D_acV/dx+(S_ac-j_ac)/(1-Fr_ac**2), Q_abV, Q_acV, -eta_ab+eta_ac])
     return A, B
 
-def QyDaUpdate(D0, Q0, D_ab, D_ac, Q_ab, Q_ac, S_ab, S_ac, deltaEtaM, deltaEtaV, W_ab, W_ac, g, d50, dx, c0, rf, eps_c):
-    Omega_abV = W_ab*D_ab
-    Omega_acV = W_ac*D_ac
-    j_ab     = uniFlowS(rf, Q_ab, W_ab, D_ab, d50, g, c0, eps_c)
-    j_ac     = uniFlowS(rf, Q_ac, W_ac, D_ac, d50, g, c0, eps_c)
-    Fr_ab    = Q_ab/(Omega_abV*np.sqrt(g*D_ab))
-    Fr_ac    = Q_ac/(Omega_acV*np.sqrt(g*D_ac))
-    deltaJ    = -j_ab/(1-Fr_ab**2)+j_ac/(1-Fr_ac**2)
-    deltaS    = S_ab/(1-Fr_ab**2)-S_ac/(1-Fr_ac**2)
-    a         = (S_ab-j_ab)/(1-Fr_ab**2)
-    b         = (S_ac-j_ac)/(1-Fr_ac**2)
-    c         = deltaEtaV-deltaEtaM
-    d         = 1/(g*Omega_abV*(1-Fr_ab**2))*(3/2*Q_ab/Omega_abV-1/2*Q_ac/Omega_acV)
-    e         = 1/(g*Omega_acV*(1-Fr_ac**2))*(3/2*Q_ac/Omega_acV-1/2*Q_ab/Omega_abV)
-    q_y       = Q0*((a-b)*dx/D0+c)/((d+e)*Q0/D0)
-    deltaDa   = -(a+b)*dx/2+q_y/2*(d-e)
-    return q_y, deltaDa
-
-def QyExpl(D_ab, D_ac, Q_ab, Q_ac, S_ab, S_ac, W_ab, W_ac, g, d50, dx, c0, rf, eps_c):
-    j_ab   = uniFlowS(rf, Q_ab, W_ab, D_ab, d50, g, c0, eps_c)
-    j_ac   = uniFlowS(rf, Q_ac, W_ac, D_ac, d50, g, c0, eps_c)
+def QyExpl(D_ab,D_ac,Q_ab,Q_ac,S_ab,S_ac,W_ab,W_ac,g,d50,dx,c0,rf,eps_c):
+    j_ab   = uniFlowS(rf,Q_ab,W_ab,D_ab,d50,g,c0,eps_c)
+    j_ac   = uniFlowS(rf,Q_ac,W_ac,D_ac,d50,g,c0,eps_c)
     Fr_ab  = Q_ab/(W_ab*D_ab*np.sqrt(g*D_ab))
     Fr_ac  = Q_ac/(W_ac*D_ac*np.sqrt(g*D_ac))
     deltaJ = -j_ab/(1-Fr_ab**2)+j_ac/(1-Fr_ac**2)
@@ -406,19 +415,19 @@ def QyExpl(D_ab, D_ac, Q_ab, Q_ac, S_ab, S_ac, W_ab, W_ac, g, d50, dx, c0, rf, e
     a2     = (S_ac*Fr_ac**2-j_ac)/(1-Fr_ac**2)
     b1     = 1/(1-Fr_ab**2)*Q_ab/(g*W_ab**2*D_ab**2)
     b2     = 1/(1-Fr_ac**2)*Q_ac/(g*W_ac**2*D_ac**2)
-    q_y    = (a1-a2)/(b1+b2)
-    return q_y*dx
+    Q_y    = (a1-a2)/(b1+b2)*dx
+    return Q_y
 
-def dDadxExpl(q_y, D_ab, D_ac, Q_ab, Q_ac, S_ab, S_ac, W_ab, W_ac, g, d50, c0, rf, eps_c):
-    j_ab  = uniFlowS(rf, Q_ab, W_ab, D_ab, d50, g, c0, eps_c)
-    j_ac  = uniFlowS(rf, Q_ac, W_ac, D_ac, d50, g, c0, eps_c)
+def dDadxExpl(Q_y,D_ab,D_ac,Q_ab,Q_ac,S_ab,S_ac,W_ab,W_ac,g,d50,dx,c0,rf,eps_c):
+    j_ab  = uniFlowS(rf,Q_ab,W_ab,D_ab,d50,g,c0,eps_c)
+    j_ac  = uniFlowS(rf,Q_ac,W_ac,D_ac,d50,g,c0,eps_c)
     Fr_ab = Q_ab/(W_ab*D_ab*np.sqrt(g*D_ab))
     Fr_ac = Q_ac/(W_ac*D_ac*np.sqrt(g*D_ac))
     a1    = (S_ab-j_ab)/(1-Fr_ab**2)
     a2    = (S_ac-j_ac)/(1-Fr_ac**2)
     b1    = 1/(1-Fr_ab**2)*Q_ab/(g*W_ab**2*D_ab**2)
     b2    = 1/(1-Fr_ac**2)*Q_ac/(g*W_ac**2*D_ac**2)
-    dDadx = 0.5*(a1+a2)-0.5*q_y*(b1-b2)
+    dDadx = 0.5*(a1+a2)-0.5*Q_y/dx*(b1-b2)
     return dDadx
 
 def minmod(slope1,slope2):
