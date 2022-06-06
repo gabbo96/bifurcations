@@ -7,8 +7,9 @@ from functions import *
 # Model settings
 alpha      = 0  # if ==0, it is computed by assuming betaR=betaC
 alpha_var  = 'deltaEtaLin'
-inStep     :list = [-0.004]
+inStep     :list = [-0.001]
 Hcoeff     = 0 # =(Hd-H0)/D0, where H0 is the wse associated to D0 and Hd is the imposed downstream BC
+THd        = 0 # =dHd/dt*, downstream BC timescale
 
 # I/O settings
 numPlots    = 20
@@ -18,8 +19,9 @@ saveOutputs = False
 # Numerical parameters
 dt        = 200 # timestep [s]
 dx        = 50 # cell length [m]
-tend      = 50
-maxIter   = int(1e6)+1 # max number of iterations during time evolution
+tend      = 100
+tEq       = 5 # if deltaQ remains constant for tEq (non-dimensional), the simulation ends
+maxIter   = int(1e6) # max number of iterations during time evolution
 tol       = 1e-10 # Iterations tolerance
 
 # Hydraulic parameters
@@ -27,8 +29,8 @@ RF     = 0 # flow resistance formula switch: if=0, C=C0 is a constant; if=1, C v
 C0     = 0 # if =0, it's computed as a function of D0=ds0/d50 via a logarithmic formula
 eps_c  = 2.5 # Chézy logarithmic formula coefficient (used only if RF=1 or C0=0)
 TF     = 'P90' # sediment transport formula. Available options: 'P78' (Parker78), 'MPM', 'P90' (Parker90), 'EH' (Engelund&Hansen)
-Ls     = 900 # =L/D0, L=branches' dimensional length
-beta0  = 18
+Ls     = 500 # =L/D0, L=branches' dimensional length
+beta0  = 20
 theta0 = 0.08
 ds0    = 0.01 # =d50/D0
 d50    = 0.01 # median sediment diameter [m]
@@ -73,20 +75,20 @@ else:
     alpha = alpha_eps
 
 # Arrays initialization
-deltaQ    : list = [0]
+deltaQ    : list = []
 nIter     = math.ceil(tend*Tf/dt)+2
 eta_bn    = np.zeros(nIter)
 eta_cn    = np.zeros(nIter)
 eta_b     = np.zeros((nIter,nc))
 eta_c     = np.zeros((nIter,nc))
-D_b       = np.zeros(nc+1)
-D_c       = np.zeros(nc+1)
-S_b       = np.zeros(nc)
-S_c       = np.zeros(nc)
-Theta_b   = np.zeros(nc+1)
-Theta_c   = np.zeros(nc+1)
-Qs_b      = np.zeros(nc+1)
-Qs_c      = np.zeros(nc+1)
+D_b       = np.ones(nc+1)*D0
+D_c       = np.ones(nc+1)*D0
+S_b       = np.ones(nc)*S0
+S_c       = np.ones(nc)*S0
+Theta_b   = np.ones(nc+1)*theta0
+Theta_c   = np.ones(nc+1)*theta0
+Qs_b      = np.ones(nc+1)*Qs0/2
+Qs_c      = np.ones(nc+1)*Qs0/2
 
 # Space-time domain for the branches
 xi = np.linspace(0,nc*dx,nc+1)  # cell interfaces coordinates
@@ -127,16 +129,30 @@ print("BRT equilibrium solution:\ndeltaQ = %5.4f\nθ_b = %4.3f, θ_c ="
       % (BRT_out[:6]))
 
 # Time evolution
+eqReached = False
 for n in range(0, maxIter):
-    S_b [0]    = (eta_bn[n]-eta_b[n,0])/dx
-    S_c [0]    = (eta_cn[n]-eta_c[n,0])/dx
-    S_b [1:-1] = (eta_b[n,:-2]-eta_b[n,2:])/(2*dx)
-    S_c [1:-1] = (eta_c[n,:-2]-eta_c[n,2:])/(2*dx)
-    S_b [-1]   = (eta_b[n,-2]-eta_b[n,-1])/dx
-    S_c [-1]   = (eta_c[n,-2]-eta_c[n,-1])/dx       
-    # Use the downstream BC to compute water depths at branches end
+    t.append(t[-1]+dt)
+    if t[-1]>tEq*Tf:
+        if np.all(abs(deltaQ[-int(tEq*Tf/dt):]/deltaQ[-1]-1)<np.sqrt(tol)):
+            if THd == 0:
+                print('\nEquilibrium reached\n')
+                break
+            elif not eqReached:
+                eqReached = True
+            else:
+                print('\nRegime condition reached\n')
+                break
+    if t[-1] >= (tend*Tf):
+        print('\nEnd time reached\n')
+        break
+
+    # Update the downstream BC and use it to compute water depths at branches end
+    if eqReached and THd != 0:
+        Hd_b.append(Hd_b[-1]+D0/THd*dt/Tf)
+        Hd_c.append(Hd_c[-1]+D0/THd*dt/Tf)
     D_b[-1] = Hd_b[-1]-(eta_b[n,-1]-0.5*S_b[-1]*dx)
     D_c[-1] = Hd_c[-1]-(eta_c[n,-1]-0.5*S_c[-1]*dx)
+    
     # Compute the discharge partitioning at the node through profiles+Hb=Hc
     D_b = buildProfile(RF,D_b[-1],Q_b,W_b,S_b,d50,dx,g,C0,eps_c)
     D_c = buildProfile(RF,D_c[-1],Q_c,W_c,S_c,d50,dx,g,C0,eps_c)
@@ -160,6 +176,14 @@ for n in range(0, maxIter):
     eta_bn[n+1] = eta_bn[n]+dt*(Qs0/2-Qs_b[0]+Qs_y)/((1-p)*alpha*W_a*W_b)
     eta_cn[n+1] = eta_cn[n]+dt*(Qs0/2-Qs_c[0]-Qs_y)/((1-p)*alpha*W_a*W_c)
 
+    # Update bed slopes
+    S_b [0]    = (eta_bn[n+1]-eta_b[n+1,0])/dx
+    S_c [0]    = (eta_cn[n+1]-eta_c[n+1,0])/dx
+    S_b [1:-1] = (eta_b[n+1,:-2]-eta_b[n+1,2:])/(2*dx)
+    S_c [1:-1] = (eta_c[n+1,:-2]-eta_c[n+1,2:])/(2*dx)
+    S_b [-1]   = (eta_b[n+1,-2]-eta_b[n+1,-1])/dx
+    S_c [-1]   = (eta_c[n+1,-2]-eta_c[n+1,-1])/dx
+
     # Update time-controlled lists
     deltaQ.append((Q_b-Q_c)/Q0)
     inStep.append((eta_bn[n+1]-eta_cn[n+1])/D0)
@@ -169,13 +193,9 @@ for n in range(0, maxIter):
         alpha = alpha_eps+(alpha_eq-alpha_eps)*abs(inStep[-1]/inStep_eq_BRT)
 
     # Time print, update and check if the simulation ends
-    # Print elapsed time
     if n % 2500 == 0:
-        print("Elapsed time = %4.1f Tf, deltaQ = %5.4f" % (t[n]/Tf,deltaQ[n+1]))
-    t.append(t[-1]+dt)
-    if t[n] >= (tend * Tf):
-        print('\nEnd time reached\n')
-        break    
+        print("Elapsed time = %4.1f Tf, deltaQ = %5.4f" % (t[n]/Tf,deltaQ[n]))
+    
 
 # Print final deltaQ
 print('Final ∆Q = %5.4f' % deltaQ[-1])
@@ -189,10 +209,10 @@ nFig = 0
 # Bed evolution plot
 crange          = np.linspace(0, 1, numPlots)
 bed_colors      = plt.cm.viridis(crange)
-plotTimeIndexes = np.linspace(0, n+1, numPlots)
+plotTimeIndexes = np.linspace(0, n, numPlots)
 plt.figure(nFig+1)
 plt.title('Branch B bed evolution in time')
-plt.xlabel('x/Wa [-]')
+plt.xlabel('x/W0 [-]')
 plt.ylabel('(η-η0)/D0 [-]')
 plt.figure(nFig+2)
 plt.title('Branch C bed evolution in time')
@@ -202,9 +222,20 @@ for i in range(numPlots):
     plotTimeIndex = int(plotTimeIndexes[i])
     myPlot(nFig+1, xc/W_a, (eta_b[plotTimeIndex,:]-eta_b[0,:])/D0, ('t=%3.1f Tf' % (plotTimeIndex*dt/Tf)), color=bed_colors[i])
     myPlot(nFig+2, xc/W_a, (eta_c[plotTimeIndex,:]-eta_c[0,:])/D0, ('t=%3.1f Tf' % (plotTimeIndex*dt/Tf)), color=bed_colors[i])
-nFig += 2   
+nFig += 2
+# Plot bed evolution at relevant cross-sections (upstream, middle, downstream)
+nFig += 1
+fig, ax = plt.subplots(1, 3, num=nFig)
+ax[0].plot(t[:-1]/Tf, (eta_b[:n+1,       0 ]-eta_b[0,       0 ])/D0, label='Branch B')
+ax[0].plot(t[:-1]/Tf, (eta_c[:n+1,       0 ]-eta_c[0,       0 ])/D0, label='Branch C')
+ax[1].plot(t[:-1]/Tf, (eta_b[:n+1,int(nc/2)]-eta_b[0,int(nc/2)])/D0, label='Branch B')
+ax[1].plot(t[:-1]/Tf, (eta_c[:n+1,int(nc/2)]-eta_c[0,int(nc/2)])/D0, label='Branch C')
+ax[2].plot(t[:-1]/Tf, (eta_b[:n+1,-      1 ]-eta_b[0,-      1 ])/D0, label='Branch B')
+ax[2].plot(t[:-1]/Tf, (eta_c[:n+1,-      1 ]-eta_c[0,-      1 ])/D0, label='Branch C')
+subplotsLayout(ax, ['t/Tf [-]', 't/Tf [-]', 't/Tf [-]'], ['(η-η0)/D0 [-]', None, None],
+               ['upstream', 'Bed elevation vs time\n\nmiddle', 'downstream'])
 # Plot deltaQ evolution over time
 nFig += 1
-myPlot(nFig,t/Tf,deltaQ,'deltaQ','Discharge asymmetry vs time','t/Tf [-]','deltaQ')
+myPlot(nFig,t[1:-1]/Tf,deltaQ,'deltaQ','Discharge asymmetry vs time','t/Tf [-]','deltaQ [-]')
 
 plt.show()
