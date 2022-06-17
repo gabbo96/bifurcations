@@ -5,14 +5,15 @@ from functions import *
 # -------------------------
 
 # Model settings
-procedure  = 1 # 0: simplified procedure, i.e., first compute water depths along semichannels in upstream direction, then compute water discharges.
-# 1: complete procedure: starting from the known discharge value 
-bifoSwitch = 1 # if ==1, two anabranches are attached at the downstream end of the semichannels
-st         = 0 # Solid transport switch: 0=fixed bed; 1=movable bed
-bedIC      = 'triangular' # 'exp' adds a gradual inlet step with an exponential trend, so that deltaEta[-1 ]=inStep[0]; 'flat'; 'lastCell'; 'triangular'
-ISlength   = 1 # % of channel length influenced by inlet step; used if bedIC=='triangular' or bedIC=='exp'
-inStep     :list = [-0.004]
-Hcoeff     = 0 # =(Hd-H0)/D0, where H0 is the wse associated to D0 and Hd is the imposed downstream BC
+procedure   = 1 # 0: simplified procedure, i.e., first compute water depths along semichannels in upstream direction, then compute water discharges.
+# 1: complete procedure: starting from the known discharge value
+bifoSwitch  = 1 # if ==1, two anabranches are attached at the downstream end of the semichannels
+st          = 0 # Solid transport switch: 0=fixed bed; 1=movable bed
+bedIC       = 'triangular' # 'exp' adds a gradual inlet step with an exponential trend, so that deltaEta[-1 ]=inStep[0]; 'flat'; 'lastCell'; 'triangular'
+ISlength    = 0.5 # % of channel length influenced by inlet step; used if bedIC=='triangular' or bedIC=='exp'
+deltaQstart = ISlength
+inStep      :list = [-0.01]
+Hcoeff      = 0 # =(Hd-H0)/D0, where H0 is the wse associated to D0 and Hd is the imposed downstream BC
 
 # I/O settings
 numPlots    = 20
@@ -20,20 +21,21 @@ showPlots   = True
 saveOutputs = False
 
 # Numerical parameters
-dt        = 600 # timestep [s]
-dx        = 5 # cell length [m]
-tend      = 3
+CFL       = 0.9
+dx        = 30 # cell length [m]
+tend      = 4
 maxIter   = int(1e6)*st+1 # max number of iterations during time evolution
 maxIterQy = 10
-tol       = 1e-10 # Iterations tolerance
+maxIterSM = 1 # max n° of iterations for shooting method (simplified procedure only)
+tol       = 1e-8 # Iterations tolerance
 
 # Hydraulic parameters
 RF     = 0 # flow resistance formula switch: if=0, C=C0 is a constant; if=1, C varies according to local water depth
 C0     = 0 # if =0, it's computed as a function of D0=ds0/d50 via a logarithmic formula
 eps_c  = 2.5 # Chézy logarithmic formula coefficient (used only if RF=1 or C0=0)
 TF     = 'P90' # sediment transport formula. Available options: 'P78' (Parker78), 'MPM', 'P90' (Parker90), 'EH' (Engelund&Hansen)
-Ls     = 500 # =L/D0, L=branches' dimensional length
-beta0  = 20
+Ls     = 1800 # =L/D0, L=branches' dimensional length
+beta0  = 15
 theta0 = 0.08
 ds0    = 0.01 # =d50/D0
 d50    = 0.01 # median sediment diameter [m]
@@ -68,7 +70,8 @@ betaR = betaR_MR(theta0, ds0, r, phiD0, phiT0, eps_c)
 
 # Arrays initialization
 t         : list = [0]
-deltaQ    : list = [0]
+dts       : list = []
+deltaQbif : list = [0]
 qylist    : list = []
 k_control : list = []
 eta_ab    = np.zeros((maxIter+1,nc+1))
@@ -76,15 +79,16 @@ eta_ac    = np.zeros((maxIter+1,nc+1))
 eta_b     = np.zeros((maxIter+1,nc))
 eta_c     = np.zeros((maxIter+1,nc))
 D_a       = np.zeros(nc+1)
-D_ab      = np.zeros(nc+1)
-D_ac      = np.zeros(nc+1)
-D_b       = np.zeros(nc+1)
-D_c       = np.zeros(nc+1)
-Q_ab      = np.zeros(nc+1)
-Q_ac      = np.zeros(nc+1)
+D_ab      = np.ones(nc+1)*D0
+D_ac      = np.ones(nc+1)*D0
+D_b       = np.ones(nc+1)*D0
+D_c       = np.ones(nc+1)*D0
+Q_ab      = np.ones(nc+1)*Q0/2
+Q_ac      = np.ones(nc+1)*Q0/2
 Q_y       = np.zeros(nc)
-S_ab      = np.zeros(nc)
-S_ac      = np.zeros(nc)
+deltaQ    = np.zeros(nc+1)
+S_ab      = np.ones(nc)*S0
+S_ac      = np.ones(nc)*S0
 S_b       = np.ones(nc)*S0
 S_c       = np.ones(nc)*S0
 Theta_ab  = np.zeros(nc+1)
@@ -138,11 +142,11 @@ else:
 
 # Print model parameters
 print('\nINPUT PARAMETERS:\nHcoeff = %3.2f\nSolid transport formula = %s\nnc = %d\ndx = %d m'
-      '\ndt = %d s\nt_end = %2.1f Tf\nL* = %d\nβ0 = %4.2f\nθ0 = %4.3f\nds0 = %2.1e\nr = %2.1f'
+      '\CFL = %3.2f s\nt_end = %2.1f Tf\nL* = %d\nβ0 = %4.2f\nθ0 = %4.3f\nds0 = %2.1e\nr = %2.1f'
       '\nd50 = %3.2e m\n'
       '\nMAIN CHANNEL IC:\nW0 = %4.2f m\nS0 = %3.2e\nD0 = %3.2f m\nFr0 = %2.1f\nL = %4.1f m\n'
       'Q0 = %3.2e m^3 s^-1\nQs0 = %3.2e m^3 s^-1\n\nExner time: Tf = %3.2f h'
-      % (Hcoeff, TF, nc, dx, dt, tend, Ls, beta0, theta0, ds0, r, d50, W0, S0, D0, Fr0, Ls*D0, Q0, Qs0, Tf/3600))
+      % (Hcoeff, TF, nc, dx, CFL, tend, Ls, beta0, theta0, ds0, r, d50, W0, S0, D0, Fr0, Ls*D0, Q0, Qs0, Tf/3600))
 
 print('\nINLET STEP SETTINGS:\nbedIC = %s\nISlength = %3.2f\ninStep = %3.2f' 
       % (bedIC,ISlength,inStep[0]))
@@ -153,12 +157,25 @@ print('\n')
 
 # Plot bed elevation IC
 if bedIC != 'flat':
-    myPlot(0,xi/W0,eta_ab[0,:],'eta_ab','Semichannels bed profiles IC','x[m]','η [m]')
-    myPlot(0,xi/W0,eta_ac[0,:],'eta_ac')
+    myPlot(0,xi/W0,eta_ab[0,:]/D0,'eta_ab','Semichannels bed profiles IC','x/W0 [-]','η0/D0 [-]')
+    myPlot(0,xi/W0,eta_ac[0,:]/D0,'eta_ac')
     if showPlots:
         plt.show()
 
 for n in range(0, maxIter):
+    # Compute dt according to CFL condition and update time. Check if system has reached equilibrium
+    Ceta_b  = C_eta(Q_b,W_b,D_b,g,delta,d50,p,C0,D0,RF,TF,eps_c)
+    Ceta_c  = C_eta(Q_c,W_c,D_c,g,delta,d50,p,C0,D0,RF,TF,eps_c)
+    Ceta_ab = C_eta(Q_ab,W_ab,D_ab,g,delta,d50,p,C0,D0,RF,TF,eps_c)
+    Ceta_ac = C_eta(Q_ac,W_ac,D_ac,g,delta,d50,p,C0,D0,RF,TF,eps_c)
+    Cmax = max(max(Ceta_b),max(Ceta_c),max(Ceta_ab),max(Ceta_ac))
+    dt   = CFL*dx/Cmax
+    dts.append(dt)
+    t.append(t[-1]+dt)
+    if t[-1] >= (tend*Tf):
+        print('\nEnd time reached\n')
+        break
+
     #? Downstream BC update: if there is no bifurcation, downstream depth is given
     #? by the known value of wse. If there is, first the water discharge partitioning at the
     #? node is computed, and the resulting average wse is used as downstream BC for the semichannels
@@ -187,23 +204,47 @@ for n in range(0, maxIter):
         D_ab[-1] = D_b[0]
         D_ac[-1] = D_c[0]
         D_a [-1] = 0.5*(D_ab[-1]+D_ac[-1])
+        deltaQ_N = (Q_b-Q_c)/Q0
 
     if procedure == 0:
         #? 'Simplified' procedure
         # First solve the 1D profile in channel a, then compute Dab and Dac exploiting dH/dy=0, then compute Qy,Qab,Qac
-        D_a        = buildProfile_rk4(RF,D_a[-1],Q0,W0,0.5*(S_ab+S_ac),d50,dx,g,C0,eps_c)
-        D_ab [:-1] = D_a[:-1]-0.5*(eta_ab[n,:-1]-eta_ac[n,:-1])
-        D_ac [:-1] = D_a[:-1]+0.5*(eta_ab[n,:-1]-eta_ac[n,:-1])
-        Q_ab[0]    = Q0/2
-        Q_ac[0]    = Q0/2
-
-        for i in range(0,nc):
-            # Compute Qy explicitly in downstream direction, computing Qab and Qac using mass continuity 
-            Q_y[i] = QyExpl(D_ab[i],D_ac[i],Q_ab[i],Q_ac[i],S_ab[i],S_ac[i],W_ab,W_ac,g,d50,dx,C0,RF,eps_c)
-            Q_ab[i+1] = Q_ab[i]+Q_y[i]
-            Q_ac[i+1] = Q_ac[i]-Q_y[i]
-        print('(Q_ab[-1]-Q_ac[-1])/(Q_b-Q_c) = %4.3f' % ((Q_ab[-1]-Q_ac[-1])/(Q_b-Q_c)))
-
+        D_a  = buildProfile_rk4(RF,D_a[-1],Q0,W0,0.5*(S_ab+S_ac),d50,dx,g,C0,eps_c)
+        D_ab = D_a-0.5*(eta_ab[n,:]-eta_ac[n,:])
+        D_ac = D_a+0.5*(eta_ab[n,:]-eta_ac[n,:])
+        # First guess on discharge partitioning at upstream end of semichannels
+        # the value of deltaQ_ups that satisfies the downstream BC lies in [0,deltaQ_N]
+        deltaQ_ups_L = 0
+        deltaQ_ups_R = deltaQ_N*0.01
+        #deltaQ[-1] = deltaQ_N
+        for k in range(maxIterSM):
+            if maxIterSM>1:
+                deltaQ[0] = 0.5*(deltaQ_ups_L+deltaQ_ups_R)
+            else:
+                deltaQ[0] = 0
+            Q_ab[0]   = Q0/2*(1+deltaQ[0])
+            Q_ac[0]   = Q0/2*(1-deltaQ[0])
+            for i in range(int(deltaQstart*nc),nc):
+                # Compute Qy explicitly in downstream direction, computing Qab and Qac using mass continuity 
+                Q_y[i] = QyExpl(D_ab[i],D_ac[i],Q_ab[i],Q_ac[i],S_ab[i],S_ac[i],W_ab,W_ac,g,d50,dx,C0,RF,eps_c)
+                Q_ab[i+1] = Q_ab[i]+Q_y[i]
+                Q_ac[i+1] = Q_ac[i]-Q_y[i]
+                deltaQ[i+1] = (Q_ab[i+1]-Q_ac[i+1])/Q0
+                
+                # Compute deltaQ using RK4
+                #deltaQ[i+1] = ddeltaQ_rk4(deltaQ[i],D_a[i],D_a[i+1],(eta_ab[n,i]-eta_ac[n,i])/D0,(eta_ab[n,i+1]-eta_ac[n,i+1])/D0,S_ab[i],S_ac[i],W_ab,W_ac,Q0,D0,g,d50,dx,C0,RF,eps_c)
+                #Q_ab[i+1]   = Q0/2*(1+deltaQ[i+1])
+                #Q_ac[i+1]   = Q0/2*(1-deltaQ[i+1])
+                #Q_y[i]      = Q_ab[i+1]-Q_ab[i]
+            if abs((deltaQ[-1]-deltaQ_N)/deltaQ_N)<np.sqrt(tol):
+                break
+            else:
+                #print('(deltaQ[-1]-deltaQ_N)/deltaQ_N = %4.3f' % ((deltaQ[-1]-deltaQ_N)/deltaQ_N))
+                if deltaQ[-1]>deltaQ_N:
+                    deltaQ_ups_R = deltaQ[0]
+                else:
+                    deltaQ_ups_L = deltaQ[0]    
+        #Q_y[-1] = Q_ab[-1]-Q_ab[-2]
     else:
         #? 'Complete' procedure
         # MT procedure (19.05.2022) for semichannels with bifo: start from Qab[-1] and Qac[-1], then
@@ -229,7 +270,7 @@ for n in range(0, maxIter):
                 D_abK = 0.5*(D_abM+D_ab[i+1])
                 D_acK = 0.5*(D_acM+D_ac[i+1])
                 # Update water depths at section M
-                dDadx = dDadxExpl(Q_yMV,D_abK,D_acK,Q_abK,Q_acK,S_ab[i],S_ac[i],W_ab,W_ac,g,d50,dx,C0,RF,eps_c)
+                dDadx = dDadxExpl(0,D_abK,D_acK,Q_abK,Q_acK,S_ab[i],S_ac[i],W_ab,W_ac,g,d50,dx,C0,RF,eps_c)
                 D_aM  = D_a[i+1]-dDadx*dx
                 D_abM = D_aM-0.5*(eta_ab[n,i]-eta_ac[n,i])
                 D_acM = D_aM+0.5*(eta_ab[n,i]-eta_ac[n,i])
@@ -256,17 +297,6 @@ for n in range(0, maxIter):
             Q_ab[i] = Q_abM
             Q_ac[i] = Q_acM
             Q_y [i] = Q_yMV_new
-        
-    """
-    # Upstream BC
-    Q_ab[0] = Q0/2
-    Q_ac[0] = Q0/2
-    Q_y [0] = 0.5*(Q_ab[1]-Q_ac[1])
-    dDadxMV = dDadxExpl(Q_y[0],D_ab[1],D_ac[1],0.5*(Q_ab[0]+Q_ab[1]),0.5*(Q_ac[0]+Q_ac[1]),S_ab[0],S_ac[0],W_ab,W_ac,g,d50,dx,C0,RF,eps_c)
-    D_ab[0] = D_ab[1]-(dDadxMV+0.5*(S_ab[0]-S_ac[0]))*dx
-    D_ac[0] = D_ac[1]-(dDadxMV-0.5*(S_ab[0]-S_ac[0]))*dx
-    D_a [0] = (D_ab[0]+D_ac[0])*0.5
-    """
 
     # Shields and Qs update for the semchannels
     Theta_a  = shieldsUpdate(RF, Q0, W0, D_a, d50, g, delta, C0, eps_c)
@@ -303,18 +333,12 @@ for n in range(0, maxIter):
         S_c[1:] = (eta_c[n+1,:-1]-eta_c[n+1,1:])/dx
 
         # Update time-controlled lists
-        deltaQ.append((Q_b-Q_c)/Q0)
+        deltaQbif.append((Q_b-Q_c)/Q0)
         inStep.append((eta_ab[n+1,-1]-eta_ac[n+1,-1])/D0)
-
-    # Time update + end-time condition for the simulation's end
-    t.append(t[-1]+dt)
-    if t[-1] >= (tend * Tf):
-        print('\nEnd time reached\n')
-        break
 
     # Print elapsed time
     if n % 100 == 0:
-        print("\nElapsed time = %4.1f Tf" % (t[n] / Tf))
+        print("Elapsed time = %4.1f Tf" % (t[n] / Tf))
         #print("Q_b/Q0 = %3.2f, Q_c/Q0 = %3.2f, D_b[0]/D0 = %4.3f, D_c[0]/D0 = %4.3f" % (Q_b/Q0,Q_c/Q0,D_b[0]/D0,D_c[0]/D0))
         #print("(Q_ab[-1]-Q_b)/Q0=%3.2e, (Q_ac[-1]-Q_c)/Q0=%3.2e" % ((Q_ab[-1]-Q_b)/Q0,(Q_ac[-1]-Q_c)/Q0))
 
@@ -331,7 +355,7 @@ if st == 1:
     # Plot evolution of bed elevation for channels Ab,Ac,B and C
     crange          = np.linspace(0, 1, numPlots)
     bed_colors      = plt.cm.viridis(crange)
-    plotTimeIndexes = np.linspace(0, n+1, numPlots)
+    plotTimeIndexes = np.linspace(0, n, numPlots)
     nFig += 1
     plt.figure(nFig)
     plt.title('Average bed elevation evolution in time')
@@ -350,12 +374,12 @@ if st == 1:
         plotTimeIndex = int(plotTimeIndexes[i])
         myPlot(nFig,   xi/W0, (0.5*(eta_ab[plotTimeIndex,:]+eta_ac[plotTimeIndex,:])-0.5*(eta_ab[0,:]+eta_ac[0,:]))/D0, 
             ('t=%3.1f Tf' % (plotTimeIndex*dt/Tf)), color=bed_colors[i])
-        myPlot(nFig+1, xi/W0, (eta_ab[plotTimeIndex,:]-eta_ab[0,:])/D0, ('t=%3.1f Tf' % (plotTimeIndex*dt/Tf)), color=bed_colors[i])
-        myPlot(nFig+2, xi/W0, (eta_ac[plotTimeIndex,:]-eta_ac[0,:])/D0, ('t=%3.1f Tf' % (plotTimeIndex*dt/Tf)), color=bed_colors[i]) 
+        myPlot(nFig+1, xi/W0, (eta_ab[plotTimeIndex,:]-eta_ab[0,:])/D0, ('t=%3.1f Tf' % (t[plotTimeIndex]/Tf)), color=bed_colors[i])
+        myPlot(nFig+2, xi/W0, (eta_ac[plotTimeIndex,:]-eta_ac[0,:])/D0, ('t=%3.1f Tf' % (t[plotTimeIndex]/Tf)), color=bed_colors[i]) 
     nFig += 2
 
     # Plot semichannels bed elevation values
-    eta_a_plot = np.vstack([(eta_ac[n+1,:]-eta_ac[0,:])/D0, (eta_ab[n+1,:]-eta_ab[0,:])/D0])
+    eta_a_plot = np.vstack([(eta_ac[n,:]-eta_ac[0,:])/D0, (eta_ab[n,:]-eta_ab[0,:])/D0])
     etamin     = min(np.amin(eta_a_plot), -np.amax(eta_a_plot))
     etamax     = max(np.amax(eta_a_plot), -np.amin(eta_a_plot))
     nFig       += 1
@@ -405,20 +429,20 @@ myPlot(nFig,xc/W0,Q_y/Q0,None,'Transverse discharge Qy scaled with Q0','x/W0 [-]
 if bifoSwitch==1 and st==1:
     plt.figure(nFig+1)
     plt.title('Branch B bed evolution in time')
-    plt.xlabel('x/Wa [-]')
+    plt.xlabel('x/W0 [-]')
     plt.ylabel('(η-η0)/D0 [-]')
     plt.figure(nFig+2)
     plt.title('Branch C bed evolution in time')
-    plt.xlabel('x/Wa [-]')
+    plt.xlabel('x/W0 [-]')
     plt.ylabel('(η-η0)/D0 [-]')
     for i in range(numPlots):
         plotTimeIndex = int(plotTimeIndexes[i])
         myPlot(nFig+1, xc/W0, (eta_b[plotTimeIndex,:]-eta_b[0,:])/D0, ('t=%3.1f Tf' % (plotTimeIndex*dt/Tf)), color=bed_colors[i])
         myPlot(nFig+2, xc/W0, (eta_c[plotTimeIndex,:]-eta_c[0,:])/D0, ('t=%3.1f Tf' % (plotTimeIndex*dt/Tf)), color=bed_colors[i])
     nFig += 2   
-    # Plot deltaQ evolution over time
+    # Plot the evolution of the deltaQ of the bifurcation over time
     nFig += 1
-    myPlot(nFig,t/Tf,deltaQ,'deltaQ','Discharge asymmetry vs time','t/Tf [-]','deltaQ')
+    myPlot(nFig,t[:-1]/Tf,deltaQbif,'deltaQ','Discharge asymmetry vs time','t/Tf [-]','deltaQ')
 
 if showPlots:
     plt.show()
