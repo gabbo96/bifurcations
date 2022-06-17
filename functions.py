@@ -38,6 +38,13 @@ def fSys(q_b, rf, ddb, ddc, d0, inStep, qu, w_b, w_c, s_b, s_c, d50, dx, g, c, e
     d_c = buildProfile(rf,ddc,q_c,w_c,s_c,d50,dx,g,c,eps_c)
     return (d_b[0]-d_c[0]+inStep*d0)/((d_b[0]+d_c[0])/2)
 
+def fSys_rk4(q_b, rf, ddb, ddc, d0, inStep, qu, w_b, w_c, s_b, s_c, d50, dx, g, c, eps_c):
+    # fSys = 0 is solved to solve the flow partition problem at the node for each time step
+    q_c = qu-q_b
+    d_b = buildProfile_rk4(rf,ddb,q_b,w_b,s_b,d50,dx,g,c,eps_c)
+    d_c = buildProfile_rk4(rf,ddc,q_c,w_c,s_c,d50,dx,g,c,eps_c)
+    return (d_b[0]-d_c[0]+inStep*d0)/((d_b[0]+d_c[0])/2)
+
 def phis_scalar(theta, tf, d0, d50):
     phi0 = 0
     phiD = 0
@@ -74,6 +81,10 @@ def phis_scalar(theta, tf, d0, d50):
         theta_cr = 0.03
         phi0 = 11.2 * theta ** 1.5 * (1 - theta_cr / theta) ** 4.5
         phiT = 1.5 + 4.5 * theta_cr / (theta - theta_cr)
+    elif tf =='WP':  # Wong&Parker (2006)
+        theta_cr = 0.0495
+        phi0 = 3.97 * (theta - theta_cr) ** 1.5
+        phiT = 1.5 * theta / (theta - theta_cr)
     else:
         print('error: unknown transport formula')
         phi0 = None
@@ -111,6 +122,12 @@ def phis(theta, tf, d0, d50):
         theta_cr = 0.03
         phi = 11.2 * theta ** 1.5 * (1 - theta_cr / theta) ** 4.5
         phiT = 1.5 + 4.5 * theta_cr / (theta - theta_cr)
+    elif tf == 'WP':  # Wong&Parker (2006)
+        theta_cr = 0.0495
+        nst = theta < theta_cr
+        phi[~nst] = 3.97 * (theta[~nst] - theta_cr) ** 1.5
+        phiT[nst] = None
+        phiT[~nst] = 1.5 * theta[~nst] / (theta[~nst] - theta_cr)
     else:
         print('error: unknown transport formula')
         phi = None
@@ -144,7 +161,7 @@ def buildProfile(rf, dd, q, w, s, d50, dx, g, c, eps_c):
         Fr = q / (w * d[i] * np.sqrt(g * d[i]))
         d[i-1] = d[i]-dx*(s[i-1]-j)/(1-Fr**2)
     Fr = q/(w*d*np.sqrt(g*d))
-    if np.any(Fr>1):
+    if np.any(Fr>0.95):
         print("Warning: supercritical flow")
     return d
 
@@ -190,8 +207,8 @@ def fSys_BRT(x, dsBC, rf, tf, theta0, Q0, Qs0, w, l, d0, s0, w_b, w_c, d50, alph
         res = np.zeros((3,))
         theta_b = x[2] * s0 * x[0] / (delta * d50)
         theta_c = x[2] * s0 * x[1] / (delta * d50)
-        phi_b = phis(np.array([theta_b]), tf, d0, d50)[0]
-        phi_c = phis(np.array([theta_c]), tf, d0, d50)[0]
+        phi_b = phis_scalar(theta_b, tf, d0, d50)[0]
+        phi_c = phis_scalar(theta_c, tf, d0, d50)[0]
         qs_b = np.sqrt(g * delta * d50 ** 3) * phi_b
         qs_c = np.sqrt(g * delta * d50 ** 3) * phi_c
         q_b = uniFlowQ(rf, w_b, x[2] * s0, x[0], d50, g, c, eps_c) / w_b
@@ -430,6 +447,33 @@ def dDadxExpl(Q_y,D_ab,D_ac,Q_ab,Q_ac,S_ab,S_ac,W_ab,W_ac,g,d50,dx,c0,rf,eps_c):
     dDadx = 0.5*(a1+a2)-0.5*Q_y/dx*(b1-b2)
     return dDadx
 
+def ddeltaQdxF(D_a,deltaQ,inStep,S_ab,S_ac,W_ab,W_ac,Q0,D0,g,d50,dx,c0,rf,eps_c):
+    D_ab = D_a-0.5*inStep*D0
+    D_ac = D_a+0.5*inStep*D0
+    Q_ab = Q0/2*(1+deltaQ)
+    Q_ac = Q0/2*(1-deltaQ)
+    Q_y = QyExpl(D_ab,D_ac,Q_ab,Q_ac,S_ab,S_ac,W_ab,W_ac,g,d50,dx,c0,rf,eps_c)
+    ddeltaQdx = 2*Q_y/(Q0*dx)
+    return ddeltaQdx
+
+def ddeltaQ_rk4(deltaQ_M,D_aM,D_aV,inStepM,inStepV,S_ab,S_ac,W_ab,W_ac,Q0,D0,g,d50,dx,c0,rf,eps_c):
+    k1 = ddeltaQdxF(D_aM,deltaQ_M,inStepM,S_ab,S_ac,W_ab,W_ac,Q0,D0,g,d50,dx,c0,rf,eps_c)
+    k2 = ddeltaQdxF(0.5*(D_aM+D_aV),deltaQ_M+0.5*dx*k1,0.5*(inStepM+inStepV),S_ab,S_ac,W_ab,W_ac,Q0,D0,g,d50,dx,c0,rf,eps_c)
+    k3 = ddeltaQdxF(0.5*(D_aM+D_aV),deltaQ_M+0.5*dx*k2,0.5*(inStepM+inStepV),S_ab,S_ac,W_ab,W_ac,Q0,D0,g,d50,dx,c0,rf,eps_c)
+    k4 = ddeltaQdxF(D_aV,deltaQ_M+dx*k3,inStepV,S_ab,S_ac,W_ab,W_ac,Q0,D0,g,d50,dx,c0,rf,eps_c)
+    deltaQ_V = deltaQ_M+dx/6*(k1+2*k2+2*k3+k4)
+    return deltaQ_V
+
+def scF(inStep):
+    dDadx = ...
+    ddeltaQdx = ...
+    return dDadx, ddeltaQdx
+
+def sc_rk4():
+    # Solves the linear momentum equation for the semichannels in a coupled fashion
+    # taking as unkwnons the average depth Da and the discahrge asymmetry deltaQ
+    return None
+
 def minmod(slope1,slope2):
     omega    = abs(slope1)<abs(slope2)
     limslope = omega*slope1+(1-omega)*slope2
@@ -452,3 +496,14 @@ def MCslope(slope1,slope2):
     signch   = (slope1*slope2>0)*(slopeC*slope2>0)
     limslope = limslope*signch
     return limslope
+
+def C_eta(Q,W,D,g,delta,d50,p,C0,D0,rf,tf,eps_c,eps=1e-6):
+    # Computes the celerity of the propagation of a perturbation of the bed elvel (kinematic wave approximation)
+    theta_epsp = shieldsUpdate(rf,Q+eps,W,D,d50,g,delta,C0,eps_c)
+    theta_epsm = shieldsUpdate(rf,Q-eps,W,D,d50,g,delta,C0,eps_c)
+    Qs_epsp    = W*np.sqrt(g*delta*d50**3)*phis(theta_epsp,tf,D0,d50)[0]
+    Qs_epsm    = W*np.sqrt(g*delta*d50**3)*phis(theta_epsm,tf,D0,d50)[0]
+    dQsdQ      = (Qs_epsp-Qs_epsm)/(2*eps)
+    Fr         = Q/(W*D*np.sqrt(g*D))
+    C_eta      = dQsdQ*(Q/(W*D))/(1-Fr**2)/(1-p)
+    return C_eta
