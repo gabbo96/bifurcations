@@ -507,3 +507,19 @@ def C_eta(Q,W,D,g,delta,d50,p,C0,D0,rf,tf,eps_c,eps=1e-6):
     Fr         = Q/(W*D*np.sqrt(g*D))
     C_eta      = dQsdQ*(Q/(W*D))/(1-Fr**2)/(1-p)
     return C_eta
+
+def deltaH_confluence(Q_b,Q_c,D_b,D_c,W_b,W_c,Q0,D0,W0,H0,kI,kb,kc,g):
+    U_b = Q_b/(W_b*D_b)
+    U_c = Q_c/(W_c*D_c)
+    U0  = Q0/(W0*D0)
+    deltaQ = (Q_b-Q_c)/Q0
+    deltaM_b = Q_b*(U0-U_b)
+    deltaM_c = Q_c*(U0-U_c)
+    FI = 0.5*W0*kI*(U_b**2-U_c**2)*(D_b+D_c)*(1-deltaQ**2)
+    FS_b = 0.5*kb*U_b**2*D_b*W0*(1+deltaQ)
+    FS_c = 0.5*kc*U_c**2*D_c*W0*(1-deltaQ)
+    sumP_b = deltaM_b+FI+FS_b
+    sumP_c = deltaM_c-FI+FS_c
+    H_b = sumP_b/(0.5*g*(D_b+D0)*W0*0.5*(1+deltaQ))+H0
+    H_c = sumP_c/(0.5*g*(D_c+D0)*W0*0.5*(1-deltaQ))+H0
+    return H_b,H_c
