@@ -5,42 +5,47 @@ from functions import *
 # -------------------------
 
 # Model main settings
-dsBC           = 1 # if 0, downstream BC is H0, possibly varying according to THd; if 1, the deltaH
+dsBC           = 0 # if 0, downstream BC is H0, possibly varying according to THd; if 1, the deltaH
 # imposed by a confluence is computed at each iteration according to the linear momentum cons. eqns of Ragno (2020)
-inStepIC       = -0.05  # =(inlet step at t=0)/(inlet step at equilibrium computed via BRT)
+inStepIC       = -0.01  # =(inlet step at t=0)/(inlet step at equilibrium computed via BRT)
 alpha_var      = 'cost' # 'deltaEtaLin': alpha varies linearly with the inlet step
 THd            = 0 # =downstream BC timescale (the higher THd, the slower Hd varies over time)
 
 # I/O settings
 numPlots    = 20
 saveOutputs = False
+expFittings = True
+
+# Setup output file
+with open('output.txt', 'w') as f:
+    f.writelines(['dsBC;inStepIC;alpha_var;THd;TF;RF;C0;Ls;beta0;theta0;ds0;d50;deltaQ_eq;deltaQ_BRT;Tbif1;Tbif2\n'])
 
 # Numerical parameters
 CFL       = 0.9 # Courant-Friedrichs-Lewy parameter for timestep computation
 dx        = 50 # cell length [m]
-tend      = 300
+tend      = 600
 tEq       = 4 # if ∆Q remains constant for tEq (non-dimensional), the simulation ends
 maxIter   = int(1e6) # max number of iterations during time evolution
 tol       = 1e-10 # Iterations tolerance
 
 # Hydraulic parameters
+TF     = 'P90' # sediment transport formula. Available options: 'P78' (Parker78), 'MPM', 'P90' (Parker90), 'EH' (Engelund&Hansen)
 RF     = 0 # flow resistance formula switch: if=0, C=C0 is a constant; if=1, C varies according to local water depth
 C0     = 12 # if =0, it's computed as a function of D0=ds0/d50 via a logarithmic formula
 eps_c  = 2.5 # Chézy logarithmic formula coefficient (used only if RF=1 or C0=0)
-TF     = 'P90' # sediment transport formula. Available options: 'P78' (Parker78), 'MPM', 'P90' (Parker90), 'EH' (Engelund&Hansen)
-Ls     = 700 # =L/D0, L=branches' dimensional length
-beta0  = 17.5
+Ls     = 750 # =L/D0, L=branches' dimensional length
+beta0  = 16
 theta0 = 0.08
 ds0    = 0.01 # =d50/D0
 d50    = 0.01 # median sediment diameter [m]
 p      = 0.6 # bed porosity
-alpha  = 0  # if ==0, it is computed by assuming betaR=betaC
+alpha  = 0  # if ==0, it is computed by assuming betaR=betaC (Redolfi et al., 2019)
 r      = 0.5 # Ikeda parameter
 
 # Confluence parameters
 kI = 0.21
 kb = 0.08
-kc = 0.08
+kc = kb
 
 # Physical constants
 delta = 1.65
@@ -62,12 +67,17 @@ Qs0   = W0*np.sqrt(g*delta*d50**3)*phi00
 Fr0   = Q0/(W0*D0*np.sqrt(g*D0))
 nc    = int(Ls*D0/dx)
 
-# βR and equilibrium alpha computation
-betaR = betaR_MR(theta0, ds0, r, phiD0, phiT0, eps_c)
-betaC = betaC_MR(RF, theta0, ds0, 1, r, phiD0, phiT0, eps_c)
+# Compute βR and then equilibrium value for alpha assuming betaR=betaC (Redolfi et al., 2019)
+betaR = betaR_MR(RF,theta0,ds0,r,phiD0,phiT0,eps_c)
+betaC = betaC_MR(RF,theta0,ds0,1,r,phiD0,phiT0,eps_c)
 alpha_MR = betaR/betaC
 if alpha == 0:
     alpha_eq = alpha_MR
+else:
+    alpha_eq = alpha
+
+# Compute critical aspect ratio for the channel loop
+betaC_loop = betaC_loopNR(r,alpha_MR,theta0,Fr0,S0,Ls,D0,C0,kI,kb,TF,RF,d50)
 
 # Equilibrium ∆Q computation through BRT method
 BRT_out = deltaQ_BRT([1.1,0.9,0.9,1.1],0,RF,TF,theta0,Q0,Qs0,W0,Ls*D0,D0,S0,0.5*W0,0.5*W0,d50,alpha_eq,r,g,delta,tol,C0,eps_c)
@@ -76,18 +86,23 @@ inStep_eq_BRT = (BRT_out[7]-BRT_out[8])/D0
 
 # Exner time computation
 Tf = (1-p)*W0*D0/(Qs0/W0)*alpha_eq
+
 # Print model settings and parameters
 print('\nINPUT PARAMETERS:\nFlow resistance formula = %s\nSolid transport formula = %s\nnc = %d\ndx = %4.2f m'
       '\nCFL = %3.2f \nt_end = %2.1f Tf\nL* = %d\nβ0 = %4.2f\nθ0 = %4.3f\nds0 = %2.1e\nα = %2.1f\nα_eq = %2.1f\nr = %2.1f'
       '\nd50 = %3.2e m\n'
-      '\nREDOLFI ET AL. [2019] RESONANT ASPECT RATIO COMPUTATION\nβR = %4.2f\n(β0-βR)/βR = %4.2f\nα_MR = %2.1f\n'
-      '\nMAIN CHANNEL IC:\W0 = %4.2f m\nS0 = %3.2e\nD0 = %3.2f m\nFr0 = %2.1f\nL = %4.1f m\nL/W0 = %4.1f\n'
+      '\nRESONANT ASPECT RATIO AND EQUILIBRIUM α ACCORDING TO REDOLFI ET AL., 2019\nβR = %4.2f\n(β0-βR)/βR = %4.2f\nα_MR = %2.1f\n'
+      '\nMAIN CHANNEL IC:\nW0 = %4.2f m\nS0 = %3.2e\nD0 = %3.2f m\nFr0 = %2.1f\nL = %4.1f m\nL/W0 = %4.1f\n'
       'Q0 = %3.2e m^3 s^-1\nQs0 = %3.2e m^3 s^-1\n\nExner time: Tf = %3.2f h\n'
       % (RF, TF, nc, dx, CFL, tend, Ls, beta0, theta0, ds0, alpha, alpha_eq, r, d50, betaR, (beta0-betaR) / betaR,
          alpha_MR, W0, S0, D0, Fr0, Ls*D0, Ls*D0/W0, Q0, Qs0, Tf/3600))
-print("BRT equilibrium solution:\n∆η = %5.4f" % inStep_eq_BRT)
+print("BRT EQUILIBRIUM SOLUTION:\n∆η = %5.4f" % inStep_eq_BRT)
 print("∆Q = %5.4f\nθ_b = %4.3f, θ_c = %4.3f\nFr_b = %3.2f, Fr_c = %3.2f\nS = %2.1e\n" % (BRT_out[:6]))
 
+if dsBC==1:
+    print('CHANNEL LOOP CRITICAL ASPECT RATIO (RAGNO ET AL., 2021)')
+    print('βC = %4.2f' % betaC_loop)
+    print('(β0-βC)/βC = %4.2f\n' % ((beta0-betaC_loop)/betaC_loop))
 # Arrays initialization to IC
 t         : list = [0]
 dts       : list = []  # list where to store the timestep values computed by means of CFL
@@ -238,10 +253,24 @@ for n in range(1, maxIter):
     if n % 500 == 0:
         print("Elapsed time = %4.1f Tf, ∆Q = %5.4f" % (t[n]/Tf,deltaQ[n]))
 
-# Print final ∆Q
+# Print final ∆Q and compare it with that computed through BRT model
 print('Final ∆Q = %5.4f' % deltaQ[-1])
 print('∆Q at equilibrium according to BRT = %5.4f' % deltaQ_eq_BRT)
 print('Difference = %2.1f %%\n' % (100*abs((abs(deltaQ[-1])-deltaQ_eq_BRT)/deltaQ_eq_BRT)))
+
+# Compute evolutionary timescales
+flexIndex = flexFinder(np.asarray(deltaQ),(np.asarray(t[1:-2])-np.asarray(t[:-3]))/Tf)
+Tbif1,Tbif2 = [0,0]
+if flexIndex != 0 and expFittings:
+    exp1FitEnd                = int(0.8*flexIndex)
+    exp1Par,exp1Fit,exp1Error = interpolate(exponential,t[:exp1FitEnd]/Tf,deltaQ[:exp1FitEnd],ic=[deltaQ[0], 0.2])
+    exp2Par,exp2Fit,exp2Error = interpolate(expLab,t[flexIndex:-1]/Tf,deltaQ[flexIndex:],ic=[deltaQ[flexIndex], deltaQ[-1], 0.2])
+    Tbif1,Tbif2               = [1/exp1Par[1],1/exp2Par[2]]
+
+# Save outputs on text file
+with open('output.txt', 'a') as f:
+    f.writelines(['%d;%4.3f;%s;%2.1f;%s;%d;%3.1f;%d;%3.1f;%4.3f;%4.3f;%4.3f;%5.4f;%5.4f;%4.3f;%4.3f\n'
+    % (dsBC,inStepIC,alpha_var,THd,TF,RF,C0,Ls,beta0,theta0,ds0,d50,deltaQ[-1],deltaQ_eq_BRT,Tbif1,Tbif2)])
 
 # PLOTS
 # -----
@@ -286,9 +315,13 @@ ax[2].plot(t[:-1]/Tf, (eta_b[:n,-      1 ]-eta_b[0,-      1 ])/D0, label='Branch
 ax[2].plot(t[:-1]/Tf, (eta_c[:n,-      1 ]-eta_c[0,-      1 ])/D0, label='Branch C')
 subplotsLayout(ax, ['t/Tf [-]', 't/Tf [-]', 't/Tf [-]'], ['(η-η0)/D0 [-]', None, None],
                ['upstream', 'Bed elevation vs time\n\nmiddle', 'downstream'])
-# Plot ∆Q evolution over time
+
+# Plot ∆Q evolution over time along with exponential fittings if available
 nFig += 1
-myPlot(nFig,t[1:-1]/Tf,deltaQ[1:]/deltaQ_eq_BRT,None,'Discharge asymmetry vs time','t/Tf [-]','∆Q/∆Q_BRT [-]')
+myPlot(nFig,t[1:-1]/Tf,deltaQ[1:]/deltaQ_eq_BRT,'Computed','Discharge asymmetry vs time','t/Tf [-]','∆Q/∆Q_BRT [-]')
+if expFittings:
+    myPlot(nFig,t[1:exp1FitEnd]/Tf,exp1Fit[1:]/deltaQ_eq_BRT,'First stage exponential fit')
+    myPlot(nFig,t[flexIndex:-1]/Tf,exp2Fit/deltaQ_eq_BRT,'Second stage exponential fit')
 
 # Plot ∆η evolution over time
 nFig += 1
