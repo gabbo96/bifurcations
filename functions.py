@@ -135,16 +135,16 @@ def phis(theta, tf, d0, d50):
     return phi, phiD, phiT
 
 
-def betaR_MR(theta, ds, r, phiD, phiT, eps_c):
+def betaR_MR(rf,theta, ds, r, phiD, phiT, eps_c):
     c0 = 6+2.5*np.log(1/(eps_c*ds))
-    cD = 2.5/c0
+    cD = 2.5/c0*rf
     betaR = np.pi/(2*np.sqrt(2))*c0*np.sqrt(r)/(theta**0.25*np.sqrt(phiD+phiT-(1.5+cD)))
     return betaR
 
 
 def betaC_MR(rf, theta, ds, alpha, r, phiD, phiT, eps_c):
     c0 = 6 + 2.5 * np.log(1 / (eps_c * ds))
-    cD = 2.5 / c0
+    cD = 2.5/c0*rf
     betaC = r * alpha * 4 / (theta ** 0.5) * 1 / (-(1.5 + cD) + phiT + phiD)
     return betaC
 
@@ -333,11 +333,12 @@ def subplotsLayout(axes, x_labels, y_labels, titles):
 
 def flexFinder(f, dx):
     # Finds the inflection point of a given 1d array, by setting the numerical second derivative equal to 0
-    df2dx2 = (f[2:] - 2 * f[1:-1] + f[:-2]) / dx
-    for i in range(int(0.01 * len(df2dx2)), len(df2dx2) - 1):
-        if df2dx2[i] * df2dx2[i + 1] < 0:
-            print("Inflection point found at x = %2.1f\n" % (i * dx))
-            return i + 1
+    # NB: dx must be an array
+    df2dx2 = (f[2:]-2*f[1:-1]+f[:-2])/dx
+    for i in range(int(0.01 * len(df2dx2)),len(df2dx2)-1):
+        if df2dx2[i]*df2dx2[i+1]<0:
+            print("Inflection point found at x = %2.1f\n" % (np.sum(dx[:i+1])))
+            return i+1
     print("Inflection point not found. flexIndex is set to 0. \n")
     return 0
 
@@ -352,7 +353,7 @@ def interpolate(func, xData, yData, ic=None, bounds=(-np.inf, np.inf)):
     elif len(par) == 4:
         intCurve = func(xData, par[0], par[1], par[2], par[3])
     else:
-        print("Interpolation failed. The interpolation function must have 2 or 3 parameters")
+        print("Interpolation failed. The interpolation function must have less than 5 parameters")
         intCurve = -1 * np.ones(len(xData))
     return par, intCurve, covar
 
@@ -509,17 +510,36 @@ def C_eta(Q,W,D,g,delta,d50,p,C0,D0,rf,tf,eps_c,eps=1e-6):
     return C_eta
 
 def deltaH_confluence(Q_b,Q_c,D_b,D_c,W_b,W_c,Q0,D0,W0,H0,kI,kb,kc,g):
-    U_b = Q_b/(W_b*D_b)
-    U_c = Q_c/(W_c*D_c)
-    U0  = Q0/(W0*D0)
-    deltaQ = (Q_b-Q_c)/Q0
+    U_b      = Q_b/(W_b*D_b)
+    U_c      = Q_c/(W_c*D_c)
+    U0       = Q0/(W0*D0)
+    deltaQ   = (Q_b-Q_c)/Q0
     deltaM_b = Q_b*(U0-U_b)
     deltaM_c = Q_c*(U0-U_c)
-    FI = 0.5*W0*kI*(U_b**2-U_c**2)*(D_b+D_c)*(1-deltaQ**2)
-    FS_b = 0.5*kb*U_b**2*D_b*W0*(1+deltaQ)
-    FS_c = 0.5*kc*U_c**2*D_c*W0*(1-deltaQ)
-    sumP_b = deltaM_b+FI+FS_b
-    sumP_c = deltaM_c-FI+FS_c
-    H_b = sumP_b/(0.5*g*(D_b+D0)*W0*0.5*(1+deltaQ))+H0
-    H_c = sumP_c/(0.5*g*(D_c+D0)*W0*0.5*(1-deltaQ))+H0
+    FI       = 0.5*W0*kI*(U_b**2-U_c**2)*(D_b+D_c)*(1-deltaQ**2)
+    FS_b     = 0.5*kb*U_b**2*D_b*W0*(1+deltaQ)
+    FS_c     = 0.5*kc*U_c**2*D_c*W0*(1-deltaQ)
+    sumP_b   = deltaM_b+FI+FS_b
+    sumP_c   = deltaM_c-FI+FS_c
+    H_b      = sumP_b/(0.5*g*(D_b+D0)*W0*0.5*(1+deltaQ))+H0
+    H_c      = sumP_c/(0.5*g*(D_c+D0)*W0*0.5*(1-deltaQ))+H0
     return H_b,H_c
+
+def betaC_loopNR(r,alpha,theta0,Fr0,S0,Ls,D0,C0,kI,kb,tf,rf,d50):
+    Lambda         = Fr0**2/(S0*Ls)
+    csi            = 8*kI+2*kb-1
+    phi0,phiD,phiT = phis_scalar(theta0,tf,D0,d50)
+    cD             = 2.5/C0*rf
+    phi            = csi*(0.5*(phiT+phiD)-phiT*(1.5+cD))-(0.5*kb-csi)*(phiT-0.5)
+    return 2*r*alpha/np.sqrt(theta0)*(2+Lambda*csi)/(phiT+phiD-cD-1.5+Lambda*phi)
+
+def newton(xn,f,args,tol=1e-10):
+    eps = 1e-7
+    maxIterNewton = 100
+    for n in range(maxIterNewton):
+        res = f(xn,*args)
+        if abs(res)<tol:
+            break
+        df = (f(xn+eps,*args)-f(xn-eps,*args))/(2*eps)
+        xn = xn-res/df
+    return xn
