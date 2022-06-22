@@ -205,7 +205,7 @@ for n in range(1, maxIter):
     D_b[n,:] = buildProfile_rk4(RF,D_b[n,-1],Q_b[n],W_b,S_b[n-1,:],d50,dx,g,C0,eps_c)
     D_c[n,:] = buildProfile_rk4(RF,D_c[n,-1],Q_c[n],W_c,S_c[n-1,:],d50,dx,g,C0,eps_c)
     if abs((D_b[n,0]-D_c[n,0]+inStep[-1]*D0)/(0.5*(D_b[n,0]+D_c[n,0])))>tol:
-        Q_b[n]   = opt.fsolve(fSys_rk4,Q_b[n],(RF,D_b[n,-1],D_c[n,-1],D0,inStep[-1],Q0,W_b,W_c,S_b[n-1,:],S_c[n-1,:],d50,dx,g,C0,eps_c),xtol=tol)
+        Q_b[n]   = newton(Q_b[n-1],fSys_rk4,(RF,D_b[n,-1],D_c[n,-1],D0,inStep[-1],Q0,W_b,W_c,S_b[n-1,:],S_c[n-1,:],d50,dx,g,C0,eps_c))
         Q_c[n]   = Q0-Q_b[n]
         D_b[n,:] = buildProfile_rk4(RF,D_b[n,-1],Q_b[n],W_b,S_b[n-1,:],d50,dx,g,C0,eps_c)
         D_c[n,:] = buildProfile_rk4(RF,D_c[n,-1],Q_c[n],W_c,S_c[n-1,:],d50,dx,g,C0,eps_c)
