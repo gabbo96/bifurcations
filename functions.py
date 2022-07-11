@@ -1,27 +1,34 @@
 from cmath import sqrt
 from matplotlib import pyplot as plt
-from pyrsistent import b
 from scipy import optimize as opt
 import numpy as np
 import math
 
 
-def uniFlowQ(rf, w, s, d, d50, g, c, eps_c):
+def uniFlowQ(rf, w, s, d, d50, g, c, eps_c, arl=True):
     # Uniform flow discharge computation
-    c = (6+2.5*np.log(d/(eps_c*d50)))*rf+c*(1-rf)
-    return w*c*(g*s)**0.5*d**1.5
+    if arl:
+        c = (6+2.5*np.log(d/(eps_c*d50)))*rf+c*(1-rf)
+        return w*c*(g*s)**0.5*d**1.5
+    else:
+        rh = (w*d)/(w+2*d)
+        c = (6+2.5*np.log(rh/(eps_c*d50)))*rf+c*(1-rf)
+        return w*d*c*np.sqrt(g*rh*s)
 
 
-def chezySys(d, q, w, s, d50, g, eps_c):
+def chezySys(d, q, w, s, d50, g, eps_c, arl=True):
     # function used to solve the system of 2 equations defined by the Chézy uniform flow formula and the logarithmic
     # expression for the roughness coefficient
-    return q/(w*(6+2.5*np.log(d/(eps_c*d50)))*np.sqrt(g*s)*d**1.5)-1
+    if arl:
+        return q/(w*(6+2.5*np.log(d/(eps_c*d50)))*np.sqrt(g*s)*d**1.5)-1
+    else:
+        rh = w*d/(w+2*d)
+        return q/(w*d*(6+2.5*np.log(d/(eps_c*d50)))*np.sqrt(g*s*rh))-1
 
-
-def uniFlowD(rf, q, w, s, d50, g, c, eps_c, d0):
+def uniFlowD(rf, q, w, s, d50, g, c, eps_c, d_ic, arl=True):
     # Uniform/gradually varying flow water depth computation
     if rf == 1:
-        return opt.fsolve(chezySys, np.array([d0]), (q, w, s, d50, g, eps_c))[0]
+        return opt.fsolve(chezySys, np.array([d_ic]), (q, w, s, d50, g, eps_c, arl))[0]
     else:
         return (q/(w*c*np.sqrt(g*s)))**(2/3)
 
@@ -45,19 +52,19 @@ def fSys_rk4(q_b, rf, ddb, ddc, d0, inStep, qu, w_b, w_c, s_b, s_c, d50, dx, g, 
     d_c = buildProfile_rk4(rf,ddc,q_c,w_c,s_c,d50,dx,g,c,eps_c)
     return (d_b[0]-d_c[0]+inStep*d0)/((d_b[0]+d_c[0])/2)
 
-def phis_scalar(theta, tf, d0, d50):
-    phi0 = 0
+def phis_scalar(theta, tf, d0, d50, eps_c=2.5):
+    phi = 0
     phiD = 0
     phiT = 0
     if tf == 'MPM':
         theta_cr = 0.047
         if theta > theta_cr:
-            phi0 = 8 * (theta - theta_cr) ** 1.5
+            phi = 8 * (theta - theta_cr) ** 1.5
             phiT = 1.5 * theta / (theta - theta_cr)
     elif tf == 'EH':
-        c = 6 + 2.5 * np.log(d0 / (2.5 * d50))
+        c = 6 + 2.5 * np.log(d0 / (eps_c * d50))
         cD = 2.5 / c
-        phi0 = 0.05 * c ** 2 * theta ** 2.5
+        phi = 0.05 * c ** 2 * theta ** 2.5
         phiD = 2 * cD
         phiT = 2.5
     elif tf == 'P90':  # Parker (1990)
@@ -67,28 +74,28 @@ def phis_scalar(theta, tf, d0, d50):
         D = 0.00218
         x = theta / A
         if x > 1.59:
-            phi0 = C * D * theta ** 1.5 * (1 - B / x) ** 4.5
+            phi = C * D * theta ** 1.5 * (1 - B / x) ** 4.5
             Phi_der = 1.5 * theta ** 0.5 * (1 - B / x) ** 4.5 * C * D + 4.5 * A * B * (1. - B / x) ** 3.5 * C * D / (
                         theta ** 0.5)
         elif x >= 1:
-            phi0 = D * theta ** 1.5 * (np.exp(14.2 * (x - 1) - 9.28 * (x - 1) ** 2))
-            Phi_der = 1. / A * phi0 * (14.2 - 9.28 * 2. * (x - 1.)) + 1.5 * phi0 / theta
+            phi = D * theta ** 1.5 * (np.exp(14.2 * (x - 1) - 9.28 * (x - 1) ** 2))
+            Phi_der = 1. / A * phi * (14.2 - 9.28 * 2. * (x - 1.)) + 1.5 * phi / theta
         else:
-            phi0 = D * theta ** 1.5 * x ** 14.2
+            phi = D * theta ** 1.5 * x ** 14.2
             Phi_der = 14.2 / A * D * theta ** 1.5 * x ** 13.2 + D * x ** 14.2 * 1.5 * theta ** 0.5
-        phiT = theta / phi0 * Phi_der
+        phiT = theta / phi * Phi_der
     elif tf == 'P78':  # Parker (1978)
         theta_cr = 0.03
-        phi0 = 11.2 * theta ** 1.5 * (1 - theta_cr / theta) ** 4.5
+        phi = 11.2 * theta ** 1.5 * (1 - theta_cr / theta) ** 4.5
         phiT = 1.5 + 4.5 * theta_cr / (theta - theta_cr)
     elif tf =='WP':  # Wong&Parker (2006)
         theta_cr = 0.0495
-        phi0 = 3.97 * (theta - theta_cr) ** 1.5
+        phi = 3.97 * (theta - theta_cr) ** 1.5
         phiT = 1.5 * theta / (theta - theta_cr)
     else:
         print('error: unknown transport formula')
-        phi0 = None
-    return phi0, phiD, phiT
+        phi = None
+    return phi, phiD, phiT
 
 # Computes phi and phiT given array values of theta and D
 def phis(theta, tf, d0, d50):
@@ -111,13 +118,13 @@ def phis(theta, tf, d0, d50):
         b = 0.853
         c = 5474
         d = 0.00218
-        x = theta / a
-        phi[x >= 1] = d * (theta[x >= 1] ** 1.5) * (np.exp(14.2 * (x[x >= 1] - 1) - 9.28 * (x[x >= 1] - 1) ** 2))
-        phiT[x >= 1] = 1.5 + (-18.56 * x[x >= 1] ** 2 + 32.76 * x[x >= 1]) / a
-        phi[x > 1.59] = c * d * theta[x > 1.59] ** 1.5 * (1 - b / x[x > 1.59]) ** 4.5
-        phiT[x > 1.59] = 1.5 + 4.5 / (((x[x > 1.59] / b) - 1) * a)
-        phi[x < 1] = d * theta[x < 1] ** 1.5 * x[x < 1] ** 14.2
-        phiT[x < 1] = 1.5 + 14.2 / a
+        x = theta/a
+        phi [x >= 1]   = d * (theta[x >= 1] ** 1.5) * (np.exp(14.2 * (x[x >= 1] - 1) - 9.28 * (x[x >= 1] - 1) ** 2))
+        phiT[x >= 1]   = theta[x>=1]/phi[x>=1]*(1/a*phi[x>=1]*(14.2-9.28*2*(x[x>=1]-1))+1.5*phi[x>=1]/theta[x>=1])
+        phi [x > 1.59] = c * d * theta[x > 1.59] ** 1.5 * (1 - b / x[x > 1.59]) ** 4.5
+        phiT[x > 1.59] = theta[x>1.59]/phi[x>1.59]*(1.5*theta[x>1.59]**0.5*(1-b/x[x>1.59])**4.5*c*d+4.5*a*b*(1-b/x[x>1.59])**3.5*c*d/theta[x>1.59]**0.5)
+        phi [x < 1]    = d * theta[x < 1] ** 1.5 * x[x < 1] ** 14.2
+        phiT[x < 1]    = theta[x<1]/phi[x<1]*(14.2/a*d*theta[x<1]**1.5*x[x<1]**13.2+d*x[x<1]**14.2*1.5*theta[x<1]**0.5)
     elif tf == 'P78':  # Parker (1978)
         theta_cr = 0.03
         phi = 11.2 * theta ** 1.5 * (1 - theta_cr / theta) ** 4.5
@@ -135,16 +142,14 @@ def phis(theta, tf, d0, d50):
     return phi, phiD, phiT
 
 
-def betaR_MR(rf,theta, ds, r, phiD, phiT, eps_c):
-    c0 = 6+2.5*np.log(1/(eps_c*ds))
-    cD = 2.5/c0*rf
+def betaR_MR(theta,r,phiD,phiT,c0):
+    cD    = 2.5/c0
     betaR = np.pi/(2*np.sqrt(2))*c0*np.sqrt(r)/(theta**0.25*np.sqrt(phiD+phiT-(1.5+cD)))
     return betaR
 
 
-def betaC_MR(rf, theta, ds, alpha, r, phiD, phiT, eps_c):
-    c0 = 6 + 2.5 * np.log(1 / (eps_c * ds))
-    cD = 2.5/c0*rf
+def betaC_MR(theta,alpha,r,phiD,phiT,c0):
+    cD = 2.5/c0
     betaC = r * alpha * 4 / (theta ** 0.5) * 1 / (-(1.5 + cD) + phiT + phiD)
     return betaC
 
@@ -196,85 +201,124 @@ def exponential(time_exp, rq_0, omega):
 def expLab(time_exp, deltaQ_0, deltaQ_eq, omega):
     return (deltaQ_0 - deltaQ_eq) * np.exp(- omega * (time_exp - time_exp[0])) + deltaQ_eq
 
+def fSys_BRT_2(x,dsBC,rf,tf,theta0,Q0,Qs0,D0,W0,S0,W_b,W_c,L,alpha,r,g,delta,d50,C0,eps_c):
+    res     = np.zeros((4,))
+    D_b,D_c = x[:2]*D0
+    S_b,S_c = x[2:4]*S0
+    if dsBC == 0:
+        theta_b = S_b*D_b/(delta*d50)
+        theta_c = S_c*D_c/(delta*d50)
+        Qs_b    = W_b*np.sqrt(g*delta*d50**3)*phis_scalar(theta_b,tf,D0,d50)[0]
+        Qs_c    = W_c*np.sqrt(g*delta*d50**3)*phis_scalar(theta_c,tf,D0,d50)[0]
+        Q_b     = uniFlowQ(rf,W_b,S_b,D_b,d50,g,C0,eps_c)
+        Q_c     = uniFlowQ(rf,W_c,S_c,D_c,d50,g,C0,eps_c)
+        Qs_y    = 0.5*(Qs_b-Qs_c)
+        Q_y     = 0.5*(Q_b-Q_c)
+        res [0] = Qs_y/Qs0-Q_y/Q0+2*alpha*r/np.sqrt(theta0)*(D_c-D_b)/(0.5*(W0+W_b+W_c))
+        res [1] = (Qs_b+Qs_c)/Qs0-1
+        res [2] = (Q_b+Q_c)/Q0-1
+        res [3] = S_b/S_c-1
+    return res
+
+def deltaQ_BRT_2(alpha,ic,dsBC,rf,tf,beta0,theta0,ds0,rW,L,r,g,delta,d50,C0,eps_c):
+    D0 = d50/ds0
+    W0 = beta0*2*D0
+    S0 = theta0*delta*ds0
+    if C0 == 0:
+        C0 = 6+2.5*np.log(1/(eps_c*ds0))
+    Q0 = uniFlowQ(rf,W0,S0,D0,d50,g,C0,eps_c)
+    Qs0 = W0*np.sqrt(g*delta*d50**3)*phis_scalar(theta0,tf,D0,d50,eps_c)[0]
+    W_b = rW*W0
+    W_c = W_b
+    x = opt.fsolve(fSys_BRT_2,ic,(dsBC,rf,tf,theta0,Q0,Qs0,D0,W0,S0,W_b,W_c,L,alpha,r,g,delta,d50,C0,eps_c))
+    D_b,D_c = x[:2]*D0
+    S_b,S_c = x[2:4]*S0
+    theta_b = S_b*D_b/(delta*d50)    
+    theta_c = S_c*D_c/(delta*d50)
+    Q_b     = uniFlowQ(rf,W_b,S_b,D_b,d50,g,C0,eps_c)
+    Q_c     = uniFlowQ(rf,W_c,S_c,D_c,d50,g,C0,eps_c)
+    return (Q_b-Q_c)/Q0,(D_c-D_b)/D0,theta_b,theta_c,S_b,S_c
 
 def fSys_BRT(x, dsBC, rf, tf, theta0, Q0, Qs0, w, l, d0, s0, w_b, w_c, d50, alpha, r, g, delta, c, eps_c):
     # returns the residuals of the system of equation given by liquid and solid mass balance applied to the node and
     # one cell
-    q0 = Q0 / w
-    qs0 = Qs0 / w
+    q0  = Q0/w
+    qs0 = Qs0/w
     if dsBC == 0:
         # When the downstream BC is H=cost, the unknowns are the 2 water depths and the slope S=S_b=S_c
-        res = np.zeros((3,))
-        theta_b = x[2] * s0 * x[0] / (delta * d50)
-        theta_c = x[2] * s0 * x[1] / (delta * d50)
-        phi_b = phis_scalar(theta_b, tf, d0, d50)[0]
-        phi_c = phis_scalar(theta_c, tf, d0, d50)[0]
-        qs_b = np.sqrt(g * delta * d50 ** 3) * phi_b
-        qs_c = np.sqrt(g * delta * d50 ** 3) * phi_c
-        q_b = uniFlowQ(rf, w_b, x[2] * s0, x[0], d50, g, c, eps_c) / w_b
-        q_c = uniFlowQ(rf, w_c, x[2] * s0, x[1], d50, g, c, eps_c) / w_c
-        qs_y = (qs_b - qs_c) / (2 * alpha) * w_b / w
-        q_y = (q_b - q_c) / (2 * alpha) * w_b / w
-        res[0] = qs_y / qs0 - q_y / q0 + 2 * r * (x[1] - x[0]) / (theta0 ** 0.5 * (0.5 * (w + w_b + w_c)))
-        res[1] = (qs_b + qs_c) / (w / w_b * qs0) - 1
-        res[2] = (q_b + q_c) / (w / w_b * q0) - 1
+        res     = np.zeros((3,))
+        theta_b = x[2]*s0*x[0]*d0/(delta*d50)
+        theta_c = x[2]*s0*x[1]*d0/(delta*d50)
+        phi_b   = phis_scalar(theta_b,tf,d0,d50)[0]
+        phi_c   = phis_scalar(theta_c,tf,d0,d50)[0]
+        qs_b    = np.sqrt(g*delta*d50**3)*phi_b
+        qs_c    = np.sqrt(g*delta*d50**3)*phi_c
+        q_b     = uniFlowQ(rf,w_b,x[2]*s0,x[0]*d0,d50,g,c,eps_c)/w_b
+        q_c     = uniFlowQ(rf,w_c,x[2]*s0,x[1]*d0,d50,g,c,eps_c)/w_c
+        qs_y    = (qs_b-qs_c)/(2*alpha)*w_b/w
+        q_y     = (q_b-q_c)/(2*alpha)*w_b/w
+        res[0]  = qs_y/qs0-q_y/q0+2*r*(x[1]-x[0])*d0/(theta0**0.5*(0.5*(w+w_b+w_c)))
+        res[1]  = (qs_b+qs_c)/(w/w_b*qs0)-1
+        res[2]  = (q_b+q_c)/(w/w_b*q0)-1
         return res
-    if dsBC == 1:
+    elif dsBC == 1: # confluence as a downstream BC
+        ...
+    elif dsBC == 2:
         # When the downstream BC is uniform flow, S_b != S_c. Therefore an unknown is added to the problem. The missing
         # equation is derived from eta_b[-1]=eta_c[-1], which correlates the inlet step at equilibrium with the two
         # slopes, given the branches length
-        res = np.zeros((4,))
+        res     = np.zeros((4,))
         theta_b = x[2] * s0 * x[0] / (delta * d50)
         theta_c = x[3] * s0 * x[1] / (delta * d50)
-        phi_b = phis(np.array([theta_b]), tf, d0, d50)[0]
-        phi_c = phis(np.array([theta_c]), tf, d0, d50)[0]
-        qs_b = np.sqrt(g * delta * d50 ** 3) * phi_b
-        qs_c = np.sqrt(g * delta * d50 ** 3) * phi_c
-        q_b = uniFlowQ(rf, w_b, x[2] * s0, x[0], d50, g, c, eps_c) / w_b
-        q_c = uniFlowQ(rf, w_c, x[3] * s0, x[1], d50, g, c, eps_c) / w_c
-        qs_y = (qs_b - qs_c) / (2 * alpha) * w_b / w
-        q_y = (q_b - q_c) / (2 * alpha) * w_b / w
-        res[0] = qs_y / qs0 - q_y / q0 + 2 * r * (x[1] - x[0]) / (theta0 ** 0.5 * (0.5 * (w + w_b + w_c)))
-        res[1] = (qs_b + qs_c) / (w / w_b * qs0) - 1
-        res[2] = (q_b + q_c) / (w / w_b * q0) - 1
-        res[3] = (x[1] - x[0]) / ((x[2] - x[3]) * s0 * l) - 1
+        phi_b   = phis(np.array([theta_b]), tf, d0, d50)[0]
+        phi_c   = phis(np.array([theta_c]), tf, d0, d50)[0]
+        qs_b    = np.sqrt(g * delta * d50 ** 3) * phi_b
+        qs_c    = np.sqrt(g * delta * d50 ** 3) * phi_c
+        q_b     = uniFlowQ(rf, w_b, x[2] * s0, x[0], d50, g, c, eps_c) / w_b
+        q_c     = uniFlowQ(rf, w_c, x[3] * s0, x[1], d50, g, c, eps_c) / w_c
+        qs_y    = (qs_b - qs_c) / (2 * alpha) * w_b / w
+        q_y     = (q_b - q_c) / (2 * alpha) * w_b / w
+        res[0]  = qs_y / qs0 - q_y / q0 + 2 * r * (x[1] - x[0]) / (theta0 ** 0.5 * (0.5 * (w + w_b + w_c)))
+        res[1]  = (qs_b + qs_c) / (w / w_b * qs0) - 1
+        res[2]  = (q_b + q_c) / (w / w_b * q0) - 1
+        res[3]  = (x[1] - x[0]) / ((x[2] - x[3]) * s0 * l) - 1
         return res
 
 
-def deltaQ_BRT(ic, dsBC, rf, tf, theta_u, Qu, Qsu, w, l, d0, s0, w_b, w_c, d50, alpha, r, g, delta, tol, c, eps_c):
+def deltaQ_BRT(ic,dsBC,rf,tf,theta0,Q0,Qs0,w,l,d0,s0,w_b,w_c,d50,alpha,r,g,delta,tol,c,eps_c):
     # Computes the equilibrium solution of a bifurcation, given geometry and boundary conditions, by solving
     # numerically the nonlinear system of equations described in Bolla Pittaluga et al. (2003). Returns the discharge
     # asymmetry and the branches' main hydraulic parameters.
-    x = np.array([ic[0] * d0, ic[1] * d0, ic[2], ic[3]])
     if dsBC == 0:
-        x = opt.fsolve(fSys_BRT, x[:3], (dsBC, rf, tf, theta_u, Qu, Qsu, w, l, d0, s0, w_b, w_c, d50, alpha, r, g, delta,
+        x = opt.fsolve(fSys_BRT, ic[:-1], (dsBC, rf, tf, theta0, Q0, Qs0, w, l, d0, s0, w_b, w_c, d50, alpha, r, g, delta,
                                      c, eps_c), xtol=tol, maxfev=100000)[:3]
-        d_b, d_c = x[:2]
-        s_b = x[2] * s0
+        #x = newton(ic[:-1],fSys_BRT,(dsBC, rf, tf, theta0, Q0, Qs0, w, l, d0, s0, w_b, w_c, d50, alpha, r, g, delta, c, eps_c))
+        d_b, d_c = x[:2]*d0
+        s_b = x[2]*s0
         s_c = s_b
-    elif dsBC == 1:
-        x = opt.fsolve(fSys_BRT, x, (dsBC, rf, tf, theta_u, Qu, Qsu, w, l, d0, s0, w_b, w_c, d50, alpha, r, g, delta,
+    elif dsBC == 1: # confluence as downstream BC
+        ...
+    elif dsBC == 2: # uniform flow at downstream end of the branches
+        x = opt.fsolve(fSys_BRT, x, (dsBC, rf, tf, theta0, Q0, Qs0, w, l, d0, s0, w_b, w_c, d50, alpha, r, g, delta,
                                      c, eps_c), xtol=tol, maxfev=100000)[:4]
         d_b, d_c = x[:2]
         s_b = x[2] * s0
         s_c = x[3] * s0
-    else:
-        d_b, d_c, s_b, s_c = [None, None, None, None]
     q_b = uniFlowQ(rf, w_b, s_b, d_b, d50, g, c, eps_c)
     q_c = uniFlowQ(rf, w_c, s_c, d_c, d50, g, c, eps_c)
-    theta_b = s_b * x[0] / (delta * d50)
-    theta_c = s_c * x[1] / (delta * d50)
-    fr_b = q_b / (w_b * x[0] * np.sqrt(g * x[0]))
-    fr_c = q_c / (w_c * x[1] * np.sqrt(g * x[1]))
-    return (q_b - q_c) / Qu, theta_b, theta_c, fr_b, fr_c, s_b, s_c, d_b, d_c
+    theta_b = s_b * d_b / (delta * d50)
+    theta_c = s_c * d_c / (delta * d50)
+    fr_b = q_b / (w_b * d_b * np.sqrt(g * d_b))
+    fr_c = q_c / (w_c * d_c * np.sqrt(g * d_c))
+    return (q_b - q_c) / Q0, theta_b, theta_c, fr_b, fr_c, s_b, s_c, d_b, d_c
 
 
 def betaC_BRT(nb, beta_max, dsBC, rf, tf, theta0, ds0, w_b, w_c, Ls, d50, alpha, r, g, delta, c, eps_c):
     # Hydraulic parameters
     d0 = d50 / ds0
     s0 = theta0 * delta * d50 / d0
-    phi0 = phis(np.array([theta0]), tf, d0, d50)[0]
-    qs0 = np.sqrt(g * delta * d50 ** 3) * phi0
+    phi = phis(np.array([theta0]), tf, d0, d50)[0]
+    qs0 = np.sqrt(g * delta * d50 ** 3) * phi
     beta0 = np.linspace(0.5, beta_max, nb)
     rq = np.zeros(nb)
     db = 1.8 * d0
@@ -306,26 +350,26 @@ def betaC_BRT(nb, beta_max, dsBC, rf, tf, theta0, ds0, w_b, w_c, Ls, d50, alpha,
     return betaC
 
 
-def myPlot(fig_number, x, y, label, title=None, xlabel=None, ylabel=None, color=None, fontsize=12):
+def myPlot(fig_number, x, y, label, title=None, xlabel=None, ylabel=None, color=None, fontsize=14):
     plt.figure(fig_number)
     if title is not None:
         plt.title(title, fontsize=fontsize)
     if xlabel is not None:
-        plt.xlabel(xlabel)
+        plt.xlabel(xlabel,fontsize=fontsize)
     if ylabel is not None:
-        plt.ylabel(ylabel)
+        plt.ylabel(ylabel,fontsize=fontsize)
     plt.plot(x, y, label=label, color=color)
     plt.grid(True)
     if label is not None:
         plt.legend(loc='best')
 
 
-def subplotsLayout(axes, x_labels, y_labels, titles):
+def subplotsLayout(axes, x_labels, y_labels, titles, fontsize=14):
     ncols = len(axes)
     for j in range(ncols):
-        axes[j].set_xlabel(x_labels[j])
-        axes[j].set_ylabel(y_labels[j])
-        axes[j].set_title(titles[j])
+        axes[j].set_xlabel(x_labels[j],fontsize=fontsize)
+        axes[j].set_ylabel(y_labels[j],fontsize=fontsize)
+        axes[j].set_title(titles[j],fontsize=fontsize)
         axes[j].grid()
         axes[j].legend(loc='best')
     plt.tight_layout()
@@ -335,7 +379,7 @@ def flexFinder(f, dx):
     # Finds the inflection point of a given 1d array, by setting the numerical second derivative equal to 0
     # NB: dx must be an array
     df2dx2 = (f[2:]-2*f[1:-1]+f[:-2])/dx
-    for i in range(int(0.01 * len(df2dx2)),len(df2dx2)-1):
+    for i in range(int(0.05 * len(df2dx2)),len(df2dx2)-1):
         if df2dx2[i]*df2dx2[i+1]<0:
             print("Inflection point found at x = %2.1f\n" % (np.sum(dx[:i+1])))
             return i+1
@@ -528,18 +572,30 @@ def deltaH_confluence(Q_b,Q_c,D_b,D_c,W_b,W_c,Q0,D0,W0,H0,kI,kb,kc,g):
 def betaC_loopNR(r,alpha,theta0,Fr0,S0,Ls,D0,C0,kI,kb,tf,rf,d50):
     Lambda         = Fr0**2/(S0*Ls)
     csi            = 8*kI+2*kb-1
-    phi0,phiD,phiT = phis_scalar(theta0,tf,D0,d50)
+    phi,phiD,phiT = phis_scalar(theta0,tf,D0,d50)
     cD             = 2.5/C0*rf
     phi            = csi*(0.5*(phiT+phiD)-phiT*(1.5+cD))-(0.5*kb-csi)*(phiT-0.5)
     return 2*r*alpha/np.sqrt(theta0)*(2+Lambda*csi)/(phiT+phiD-cD-1.5+Lambda*phi)
 
-def newton(xn,f,args,tol=1e-10):
-    eps = 1e-7
-    maxIterNewton = 100
+def newton(xn,f,args,tol=1e-10,maxIterNewton=100):
+    dim = np.size(f(xn,*args))
+    eps = np.ones(dim)*1e-7
     for n in range(maxIterNewton):
-        res = f(xn,*args)
-        if abs(res)<tol:
+        res = np.asarray(f(xn,*args))
+        if np.dot(res,res)<tol**2:
             break
         df = (f(xn+eps,*args)-f(xn-eps,*args))/(2*eps)
         xn = xn-res/df
+    if n == maxIterNewton-1:
+        print("Newton method did not converge")
     return xn
+
+def labNewton(theta,TF,D0,d50,phi_target):
+    return (phis_scalar(theta,TF,D0,d50)[0]/phi_target)-1
+
+def falpha_bestfit(alpha,deltaQ,ic,dsBC,rf,tf,beta0,theta0,ds0,rW,L,r,g,delta,d50,C0,eps_c):
+    # given (beta,theta,ds) and an equilibrium value of discharge asymmetry,
+    # compute the optimal value of alpha that allows the BRT solution to match
+    # the given deltaQ.
+    deltaQ_est = deltaQ_BRT_2(alpha,ic,dsBC,rf,tf,beta0,theta0,ds0,rW,L,r,g,delta,d50,C0,eps_c)[0]
+    return deltaQ_est/deltaQ-1
