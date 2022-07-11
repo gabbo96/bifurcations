@@ -66,7 +66,7 @@ nc    = int(Ls*D0/dx)
 Tf = (1-p)*W0*D0/(Qs0/W0)
 
 # βR alpha computation
-betaR = betaR_MR(theta0, ds0, r, phiD0, phiT0, eps_c)
+betaR = betaR_MR(theta0, r, phiD0, phiT0)
 
 # Arrays initialization
 t         : list = [0]
