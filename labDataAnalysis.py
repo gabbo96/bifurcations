@@ -2,6 +2,7 @@ from functions import *
 
 setNum = 1
 
+dsBC = 0
 TF = 'P90'
 arl = True
 
@@ -53,7 +54,7 @@ betaR = betaR_MR(theta,0.5,phiD,phiT,C)
 # compute best-fit value of alpha that matches deltaQ_BRT with measured deltaQ
 for i in range(np.size(Q)):
     #alpha[i] = newton(6,falpha_bestfit,(deltaQ[i],[1.1,0.9,0.9,0.9],0,0,TF,beta[i],theta[i],ds[i],rW,7.33/(d50/ds[i]),0.5,g,delta,d50,C[i],eps_c))
-    alpha[i] = opt.fsolve(falpha_bestfit,6,(deltaQ[i],[1.1,0.9,0.9,0.9],0,0,TF,beta[i],theta[i],ds[i],rW,7.33/(d50/ds[i]),0.5,g,delta,d50,C[i],eps_c))
+    alpha[i] = opt.fsolve(falpha_bestfit,6,(deltaQ[i],[1.1,0.9,0.9,0.9],dsBC,0,TF,beta[i],theta[i],ds[i],rW,7.33/(d50/ds[i]),0.5,g,delta,d50,C[i],eps_c))
     print(deltaQ_BRT_2(alpha[i],[1.1,0.9,0.9,0.9],0,0,TF,beta[i],theta[i],ds[i],rW,7.33/(d50/ds[i]),0.5,g,delta,d50,C[i],eps_c))
 # Print outputs
 print("beta0s  = ",beta)
