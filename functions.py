@@ -37,6 +37,8 @@ def uniFlowS(rf, q, w, d, d50, g, c, eps_c):
     c = (6+2.5*np.log(d/(eps_c*d50)))*rf+c*(1-rf)
     return (q/(w*c*g**0.5*d**1.5))**2
     
+def criticalDepth(Q,g,W):
+    return (Q**2/(g*W**2))**(1/3)
 
 def fSys(q_b, rf, ddb, ddc, d0, inStep, qu, w_b, w_c, s_b, s_c, d50, dx, g, c, eps_c):
     # fSys = 0 is solved to solve the flow partition problem at the node for each time step
@@ -190,7 +192,7 @@ def buildProfile_rk4(rf, dd, q, w, s, d50, dx, g, c, eps_c):
 
 def shieldsUpdate(rf, q, w, d, d50, g, delta, c, eps_c):
     j = uniFlowS(rf, q, w, d, d50, g, c, eps_c)
-    theta = j * d / (delta * d50)
+    theta = j*d/(delta*d50)
     return theta
 
 
@@ -205,19 +207,21 @@ def fSys_BRT_2(x,dsBC,rf,tf,theta0,Q0,Qs0,D0,W0,S0,W_b,W_c,L,alpha,r,g,delta,d50
     res     = np.zeros((4,))
     D_b,D_c = x[:2]*D0
     S_b,S_c = x[2:4]*S0
-    if dsBC == 0:
-        theta_b = S_b*D_b/(delta*d50)
-        theta_c = S_c*D_c/(delta*d50)
-        Qs_b    = W_b*np.sqrt(g*delta*d50**3)*phis_scalar(theta_b,tf,D0,d50)[0]
-        Qs_c    = W_c*np.sqrt(g*delta*d50**3)*phis_scalar(theta_c,tf,D0,d50)[0]
-        Q_b     = uniFlowQ(rf,W_b,S_b,D_b,d50,g,C0,eps_c)
-        Q_c     = uniFlowQ(rf,W_c,S_c,D_c,d50,g,C0,eps_c)
-        Qs_y    = 0.5*(Qs_b-Qs_c)
-        Q_y     = 0.5*(Q_b-Q_c)
-        res [0] = Qs_y/Qs0-Q_y/Q0+2*alpha*r/np.sqrt(theta0)*(D_c-D_b)/(0.5*(W0+W_b+W_c))
-        res [1] = (Qs_b+Qs_c)/Qs0-1
-        res [2] = (Q_b+Q_c)/Q0-1
-        res [3] = S_b/S_c-1
+    theta_b = S_b*D_b/(delta*d50)
+    theta_c = S_c*D_c/(delta*d50)
+    Qs_b    = W_b*np.sqrt(g*delta*d50**3)*phis_scalar(theta_b,tf,D0,d50)[0]
+    Qs_c    = W_c*np.sqrt(g*delta*d50**3)*phis_scalar(theta_c,tf,D0,d50)[0]
+    Q_b     = uniFlowQ(rf,W_b,S_b,D_b,d50,g,C0,eps_c)
+    Q_c     = uniFlowQ(rf,W_c,S_c,D_c,d50,g,C0,eps_c)
+    Qs_y    = 0.5*(Qs_b-Qs_c)
+    Q_y     = 0.5*(Q_b-Q_c)
+    res [0] = Qs_y/Qs0-Q_y/Q0+2*alpha*r/np.sqrt(theta0)*(D_c-D_b)/(0.5*(W0+W_b+W_c))
+    res [1] = (Qs_b+Qs_c)/Qs0-1
+    res [2] = (Q_b+Q_c)/Q0-1
+    if dsBC == 0:    
+        res[3] = S_b/S_c-1
+    elif dsBC == 2:
+        res[3] = L*D0*(S_c-S_b)/(D_b-D_c)-1
     return res
 
 def deltaQ_BRT_2(alpha,ic,dsBC,rf,tf,beta0,theta0,ds0,rW,L,r,g,delta,d50,C0,eps_c):
